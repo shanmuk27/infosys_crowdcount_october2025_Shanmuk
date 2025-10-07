@@ -1,0 +1,13 @@
+list=[1,4,2,7,3,6,5]
+list.append(9)
+print(list)
+list.extend([0,6,12])
+print(list)
+list.pop()
+print(list)
+list.remove(3)
+print(list)
+list.reverse()
+print(list)
+list.sort()
+print(list)
