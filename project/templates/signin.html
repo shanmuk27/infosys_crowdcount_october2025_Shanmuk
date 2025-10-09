@@ -20,14 +20,13 @@
             color: red;
             font-size: 13px;
             text-align: center;
-            margin-top: -10px;
+            margin-top: -5px;
             margin-bottom: 10px;
-            display: none; /* Hidden by default */
         }
     </style>
 </head>
 <body>
-    <form method="POST" action="/index"> <div class="extra-text" id="register_h">Register</div>
+    <form method="POST" action="/signin"> <div class="extra-text" id="register_h">Register</div>
         <div class="extra-text" id="login_h">Login</div>
         <div class="mb-3">
             <label for="mail" class="form-label">Email</label>
@@ -41,7 +40,7 @@
             <label for="user_name_input" class="form-label">User name</label>
             <input type="text" class="form-control" name="username" id="user_name_input" placeholder="Enter User name">
         </div>
-        <div class="error-message" id="errorMessage">Invalid email or password.</div>
+        <div class="error-message" id="errorMessage">{{Error}}</div>
         <div><button type="submit" id="submit">Submit</button></div>
         <div class="extra-text" id="register">Don't have an account? <a href="#" onclick="detailsChange()">Register</a></div>
         <div class="extra-text" id="login">Have an account? <a href="#" onclick="detailsChange()">Login</a></div>
@@ -52,10 +51,9 @@
         const register = document.getElementById("register");
         const login_h = document.getElementById("login_h");
         const register_h = document.getElementById("register_h");
-        const user_name_div = document.getElementById("user_name"); 
-        const submitButton = document.getElementById("submit");
+        const user_name_div = document.getElementById("user_name");
         const form = document.querySelector('form');
-        const errorMessage = document.getElementById('errorMessage');
+        const error_message = document.getElementById("errorMessage")
 
         function setupForLogin() {
             register_h.style.display = "none";
@@ -63,9 +61,7 @@
             register.style.display = "block";
             login.style.display = "none";
             login_h.style.display = "block";
-            submitButton.textContent = "Login";
-            form.action = "/login"; // This action is less relevant if you're handling submit via JS fetch
-            errorMessage.style.display = "none"; 
+            form.action = "/login";
         }
 
         function setupForRegister() {
@@ -74,21 +70,25 @@
             register.style.display = "none";
             login.style.display = "block";
             login_h.style.display = "none";
-            submitButton.textContent = "Register";
-            form.action = "/register"; // This action is less relevant if you're handling submit via JS fetch
-            errorMessage.style.display = "none"; 
+            form.action = "/register";
         }
 
         function detailsChange() {
+            error_message.style.display = "none";
             (register_h.style.display === "none") 
                 ? setupForRegister() 
                 : setupForLogin();
         }
-
-        // Initial setup
         setupForLogin();
 
-        form.addEventListener("submit", function(e) {
+        const initialMode = "{{ mode }}";
+        if (initialMode === 'register') {
+            setupForRegister();
+        } else {
+            setupForLogin();
+        }
+
+        /*form.addEventListener("submit", function(e) {
             e.preventDefault(); // Prevent default form submission
 
             const mail = document.getElementById("mail").value;
@@ -104,7 +104,7 @@
             } else {
                 window.location.href = "/index";
             }
-        });
+        });*/
     </script>
 </body>
 </html>
