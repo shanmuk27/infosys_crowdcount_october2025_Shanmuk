@@ -16,6 +16,10 @@ config = {
 firebase=pyrebase.initialize_app(config)
 auth=firebase.auth()
 db=firebase.database()
+global email
+
+def get_user_data(user,uid,idTOken):
+    return db.child("user").child(uid).get(idTOken).val()
 
 app = Flask(__name__)
 app.secret_key = 'a-very-secret-key'
@@ -29,7 +33,7 @@ def index():
     if 'user' in session:
         uid = session['user']['uid']
         idTOken=session['user']['idToken']
-        user_data = db.child("user").child(uid).get(idTOken).val()
+        user_data = get_user_data('user',uid,idTOken)
         username = user_data.get('user_name', 'User')
         return render_template('index.html', username=username)
     else:
@@ -74,7 +78,11 @@ def register():
 def profile():
     if 'user' not in session:
         return redirect(url_for('signin'))
-    return render_template('profile.html')
+    uid = session['user']['uid']
+    idTOken=session['user']['idToken']
+    user_data = get_user_data('user',uid,idTOken)
+    username = user_data.get('user_name', 'User')
+    return render_template('profile.html',username=username,email=email)
 
 @app.route('/signout')
 def signout():
