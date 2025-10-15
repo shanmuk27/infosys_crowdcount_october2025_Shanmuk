@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css">
+    <title>Apple Count</title>
+    <style>
+        body {
+            background-color: #f7f7f7;
+            display: flex;
+            justify-content: center;
+            align-items: flex-start;
+            min-height: 100vh;
+            padding-top: 50px;
+        }
+
+        .container-box {
+            background-color: #ffffff; /* White background for the box */
+            padding: 30px;
+            border-radius: 10px; /* Rounded corners */
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1); /* Subtle shadow */
+            max-width: 400px; /* Limit the width of the container */
+            width: 100%;
+            text-align: center; /* Center text inside the box */
+        }
+
+        /* Styling for the Heading */
+        .app-heading {
+            font-family: 'Arial Black', sans-serif;
+            color: #d9534f; /* A reddish color, like an apple */
+            margin-bottom: 25px;
+            font-size: 2.2rem;
+            text-transform: uppercase;
+            letter-spacing: 1.5px;
+        }
+
+        /* Styling for the label */
+        .form-label {
+            font-weight: 500;
+            color: #555;
+            margin-bottom: 8px;
+            display: block; /* Ensure label takes full width */
+        }
+
+        /* Adjustments for the Bootstrap file input for better visual fit */
+        #formFileSm {
+            border: 1px solid #ccc;
+            padding: 10px;
+            border-radius: 5px;
+            transition: border-color 0.3s;
+            margin-bottom: 20px; /* Add space below the file input */
+        }
+
+        #formFileSm:focus {
+            border-color: #d9534f;
+            box-shadow: 0 0 0 0.25rem rgba(217, 83, 79, 0.25);
+        }
+
+        /* NEW STYLE: Container to hold and space the buttons */
+        .button-group-custom {
+            display: flex;
+            justify-content: space-between; /* Space them out */
+            gap: 15px; /* Add a small gap between buttons */
+            margin-top: 20px;
+        }
+
+        /* Styling for the buttons - custom colors for the Apple theme */
+        .btn-display {
+            background-color: #5cb85c; /* Green for 'Show Image' (like a leaf/stem) */
+            border-color: #5cb85c;
+            flex-grow: 1;
+            font-weight: bold;
+        }
+        .btn-count {
+            background-color: #d9534f; /* Red for 'Count Number' (like the apple) */
+            border-color: #d9534f;
+            flex-grow: 1;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+    <div class="container-box">
+    <h2 class="app-heading">Apple Count</h2>
+    <div class="mb-3">
+        <label for="formFileSm" class="form-label">Select file under 20MB</label>
+        <input class="form-control form-control-sm" id="formFileSm" type="file">
+        
+        <div class="button-group-custom">
+            <button class="btn btn-display" onclick="image_showing()">Show Image</button>
+            <button class="btn btn-count">Count Number</button>
+        </div>
+    </div>
+    <div id="imagecontainer"></div>
+</div>
+
+<script>
+function image_showing() {
+    let imagecontainer = document.getElementById('imagecontainer');
+    let fileInput = document.getElementById('formFileSm');
+    
+    if (fileInput.files && fileInput.files[0]) {
+        let reader = new FileReader();
+
+        reader.onload = function(e) {
+            let img = document.createElement('img');
+            img.src = e.target.result;
+            img.style.maxWidth = '300px';
+            img.style.maxHeight = '300px';
+            
+            imagecontainer.innerHTML = '';
+            imagecontainer.appendChild(img);
+        }
+
+        reader.readAsDataURL(fileInput.files[0]);
+    }
+}
+</script>
+</body>
+</html>
