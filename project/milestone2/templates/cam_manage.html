@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Easy Crowd Monitor Setup</title>
+    
+    <style>
+        *, *::before, *::after { box-sizing: border-box; }
+        html, body { margin: 0; padding: 0; height: 100%; font-family: 'Inter', sans-serif; }
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap');
+        body { background-color: #f3f4f6; min-height: 100vh; }
+        .main-container { padding: 1.5rem; }
+        @media (min-width: 768px) { .main-container { padding: 2.5rem; } }
+
+        .header { margin-bottom: 2rem; display: flex; justify-content: space-between; align-items: center; }
+        .main-title { font-size: 1.875rem; font-weight: 700; color: #1f2937; }
+        .title-highlight { color: #059669; }
+
+        .camera-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 1.5rem; }
+        .placeholder-box { padding: 2rem; text-align: center; background-color: white; border-radius: 0.75rem; border: 2px dashed #ccc; }
+
+        #addButton {
+            position: fixed; top: 20px; right: 20px;
+            width: 45px; height: 45px;
+            border-radius: 50%; border: none;
+            background-color: #059669; color: white;
+            font-size: 1.8rem; font-weight: 300;
+            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.4);
+            cursor: pointer; z-index: 1000;
+            transition: background-color 0.2s, transform 0.2s;
+        }
+        #addButton:hover {
+            background-color: #047857;
+            transform: scale(1.1);
+        }
+
+        .modal-overlay {
+            position: fixed; top: 0; right: 0; bottom: 0; left: 0;
+            background-color: rgba(17, 24, 39, 0.75);
+            padding: 1rem; z-index: 100;
+            display: none; align-items: center; justify-content: center;
+        }
+        .modal-overlay.show { display: flex; }
+        .modal-content {
+            background-color: white; border-radius: 0.75rem;
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+            width: 100%; max-width: 25rem; padding: 1.5rem;
+        }
+        
+        .form-group { margin-bottom: 1rem; }
+        .form-label { display: block; font-size: 0.875rem; font-weight: 600; color: #374151; margin-bottom: 0.5rem; }
+        .form-input { 
+            width: 100%; padding: 0.75rem; border: 1px solid #d1d5db; border-radius: 0.5rem;
+            box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+        }
+        .btn-base { padding: 0.5rem 1rem; border-radius: 0.5rem; font-weight: 600; cursor: pointer; border: none; }
+        .btn-cancel { background-color: #e5e7eb; color: #1f2937; }
+        .btn-save { background-color: #059669; color: white; }
+
+        .cam-card { 
+            background-color: white; border-radius: 0.75rem; padding: 1.5rem; 
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1); border: 1px solid #e5e7eb;
+        }
+        .btn-primary { background-color: #3b82f6; color: white; padding: 0.5rem 0.75rem; font-size: 0.85rem; }
+        .btn-delete { background-color: #ef4444; color: white; padding: 0.5rem 0.75rem; font-size: 0.85rem; }
+        
+    </style>
+</head>
+<body>
+
+    <div class="main-container">
+        <header class="header">
+            <h1 class="main-title">
+                Live Crowd Monitoring <span class="title-highlight">Dashboard</span>
+            </h1>
+        </header>
+
+        <div id="cameraList" class="camera-list">
+            <div id="emptyState" class="placeholder-box">
+                <p style="color: #6b7280; font-weight: 600;">
+                    No cameras added yet. Click the <b>+</b> button at the top right to start monitoring!
+                </p>
+            </div>
+        </div>
+    </div>
+
+    <button id="addButton" onclick="toggleAddModal()">+</button>
+
+    <!-- Modal for Adding a Camera -->
+    <div id="addCamModal" class="modal-overlay">
+        <div class="modal-content">
+            <h2 style="font-size: 1.5rem; font-weight: 600; margin-bottom: 1rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem;">
+                Add New Camera
+            </h2>
+            <form id="addCamForm">
+                
+                <div class="form-group">
+                    <label for="areaName" class="form-label">1. Area Name (e.g., Entrance)</label>
+                    <input type="text" id="areaName" required list="existingAreaNames"
+                           class="form-input"
+                           placeholder="Enter area name or select from existing">
+                    <datalist id="existingAreaNames"></datalist>
+                </div>
+
+                <div class="form-group">
+                    <label for="sourceType" class="form-label">2. Input Source Type</label>
+                    <select id="sourceType" class="form-input" onchange="updateSourceFields()" required>
+                        <option value="file">Video File Upload</option>
+                        <option value="webcam">Live Webcam Stream</option>
+                    </select>
+                </div>
+
+                <div id="fileInputContainer" class="form-group">
+                    <label for="streamFile" class="form-label">Video File</label>
+                    <input type="file" id="streamFile" name="streamFile" accept="video/*" class="form-input" required>
+                </div>
+                
+                <div id="webcamInputContainer" style="display: none;" class="form-group">
+                    <label class="form-label">Webcam Details</label>
+                    <p class="form-input" style="background-color: #eef2ff; color: #3b82f6; font-weight: 500;">
+                        Live Webcam Selected (Simulated Device).
+                    </p>
+                </div>
+
+                <div style="display: flex; justify-content: flex-end; gap: 0.75rem; margin-top: 1.5rem;">
+                    <button type="button" onclick="toggleAddModal()" class="btn-base btn-cancel">
+                        Cancel
+                    </button>
+                    <button type="button" onclick="handleFormSubmit(event)" class="btn-base btn-save">
+                        Save Camera
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script>
+        let cameraList = []; 
+
+        const addCamModal = document.getElementById('addCamModal');
+        const sourceTypeSelect = document.getElementById('sourceType');
+        const fileInputContainer = document.getElementById('fileInputContainer');
+        const webcamInputContainer = document.getElementById('webcamInputContainer');
+        const cameraListEl = document.getElementById('cameraList');
+        const emptyStateEl = document.getElementById('emptyState');
+        const areaNameInput = document.getElementById('areaName');
+        const streamFileInput = document.getElementById('streamFile');
+
+        // Modal Toggle
+        function toggleAddModal() {
+            addCamModal.classList.toggle('show');
+            if (addCamModal.classList.contains('show')) {
+                document.getElementById('addCamForm').reset();
+                updateSourceFields(); 
+            }
+        }
+
+        // Update source input fields
+        function updateSourceFields() {
+            const selectedSource = sourceTypeSelect.value;
+            if (selectedSource === 'file') {
+                fileInputContainer.style.display = 'block';
+                webcamInputContainer.style.display = 'none';
+                streamFileInput.required = true;
+            } else {
+                fileInputContainer.style.display = 'none';
+                webcamInputContainer.style.display = 'block';
+                streamFileInput.required = false;
+                streamFileInput.value = '';
+            }
+        }
+
+        // Render camera cards
+        function renderCameras() {
+            cameraListEl.innerHTML = '';
+            if (cameraList.length === 0) {
+                emptyStateEl.style.display = 'block';
+                return;
+            }
+            emptyStateEl.style.display = 'none';
+
+            cameraList.forEach(cam => {
+                const cardHTML = `
+                    <div class="cam-card">
+                        <h3 style="font-size: 1.25rem; font-weight: 600; color: #1f2937; margin-bottom: 0.5rem;">
+                            ${cam.areaName}
+                        </h3>
+                        <p style="font-size: 0.875rem; color: #6b7280; margin-bottom: 1rem;">
+                            Source: <span style="font-weight: 500;">${cam.sourceType === 'file' ? 'Video File' : 'Webcam'}</span>
+                            <br>Details: <span style="font-weight: 500; font-size: 0.8rem;">${cam.sourceDetail}</span>
+                        </p>
+                        <div style="background-color: #eef2ff; padding: 0.75rem; border-radius: 0.5rem; display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+                            <span style="font-size: 0.875rem; font-weight: 500; color: #4338ca;">Mock Count:</span>
+                            <span style="font-size: 1.5rem; font-weight: 800; color: #4f46e5;">${Math.floor(Math.random() * 150) + 10}</span>
+                        </div>
+                        <div style="display: flex; justify-content: space-between; gap: 0.5rem;">
+                            <button onclick="defineAOI('${cam.id}', '${cam.areaName}')" class="btn-base btn-primary" style="flex-grow: 1;">
+                                Define Boundaries
+                            </button>
+                            <button onclick="deleteCamera('${cam.id}', '${cam.areaName}')" class="btn-base btn-delete">
+                                Remove
+                            </button>
+                        </div>
+                    </div>
+                `;
+                cameraListEl.insertAdjacentHTML('beforeend', cardHTML);
+            });
+        }
+
+        // Save camera and upload if needed
+        async function handleFormSubmit(event) {
+            event.preventDefault();
+            const areaName = areaNameInput.value.trim();
+            const sourceType = sourceTypeSelect.value;
+            let sourceDetail = null;
+
+            if (sourceType === "file") {
+                const file = streamFileInput.files[0];
+                if (!file) {
+                    alert("Please select a video file before saving.");
+                    return;
+                }
+                sourceDetail = file.name;
+
+                // Upload video to Flask
+                const formData = new FormData();
+                formData.append("video", file);
+                formData.append("areaName", areaName);
+
+                try {
+                    const response = await fetch("/upload_video", { method: "POST", body: formData });
+                    if (response.ok) {
+                        console.log("Video uploaded successfully!");
+                    } else {
+                        console.error("Video upload failed.");
+                    }
+                } catch (error) {
+                    console.error("Error uploading video:", error);
+                }
+            } else {
+                sourceDetail = "Live Webcam Feed (Device ID: 1)";
+                //upload the webcam to the flask
+                formData.append("areaName", areaName);
+                try {
+                    const response = await fetch("/upload_cam", { method: "POST", body: formData });
+                    if (response.ok) {
+                        console.log("cam signal sent!");
+                    } else {
+                        console.error("cam signal failed.");
+                    }
+                } catch (error) {
+                    console.error("Error uploading cam:", error);
+                }
+            }
+
+            const newCamera = {
+                id: 'cam-' + Date.now(),
+                areaName: areaName,
+                sourceType: sourceType,
+                sourceDetail: sourceDetail
+            };
+
+            cameraList.push(newCamera);
+            toggleAddModal();
+            renderCameras();
+            alert(`Camera for "${areaName}" added.`);
+        }
+
+        // Delete camera
+        function deleteCamera(id, name) {
+            if (confirm(`Are you sure you want to remove "${name}"?`)) {
+                cameraList = cameraList.filter(c => c.id !== id);
+                renderCameras();
+                alert(`Camera "${name}" has been removed.`);
+            }
+        }
+
+        // Placeholder for defining AOI
+        function defineAOI(id, name) {
+            alert(`Define boundaries for camera: ${name}`);
+        }
+
+        window.onload = () => renderCameras();
+    </script>
+</body>
+</html>

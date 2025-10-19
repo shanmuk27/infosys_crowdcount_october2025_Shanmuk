@@ -16,40 +16,37 @@
         }
 
         .container-box {
-            background-color: #ffffff; /* White background for the box */
+            background-color: #ffffff;
             padding: 30px;
-            border-radius: 10px; /* Rounded corners */
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1); /* Subtle shadow */
-            max-width: 400px; /* Limit the width of the container */
+            border-radius: 10px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+            max-width: 400px;
             width: 100%;
-            text-align: center; /* Center text inside the box */
+            text-align: center;
         }
 
-        /* Styling for the Heading */
         .app-heading {
             font-family: 'Arial Black', sans-serif;
-            color: #d9534f; /* A reddish color, like an apple */
+            color: #d9534f;
             margin-bottom: 25px;
             font-size: 2.2rem;
             text-transform: uppercase;
             letter-spacing: 1.5px;
         }
 
-        /* Styling for the label */
         .form-label {
             font-weight: 500;
             color: #555;
             margin-bottom: 8px;
-            display: block; /* Ensure label takes full width */
+            display: block;
         }
 
-        /* Adjustments for the Bootstrap file input for better visual fit */
         #formFileSm {
             border: 1px solid #ccc;
             padding: 10px;
             border-radius: 5px;
             transition: border-color 0.3s;
-            margin-bottom: 20px; /* Add space below the file input */
+            margin-bottom: 20px;
         }
 
         #formFileSm:focus {
@@ -57,63 +54,127 @@
             box-shadow: 0 0 0 0.25rem rgba(217, 83, 79, 0.25);
         }
 
-        /* NEW STYLE: Container to hold and space the buttons */
         .button-group-custom {
             display: flex;
-            justify-content: space-between; /* Space them out */
-            gap: 15px; /* Add a small gap between buttons */
+            justify-content: space-between;
+            gap: 15px;
             margin-top: 20px;
         }
 
-        /* Styling for the buttons - custom colors for the Apple theme */
         .btn-display {
-            background-color: #5cb85c; /* Green for 'Show Image' (like a leaf/stem) */
+            background-color: #5cb85c;
             border-color: #5cb85c;
             flex-grow: 1;
             font-weight: bold;
         }
         .btn-count {
-            background-color: #d9534f; /* Red for 'Count Number' (like the apple) */
+            background-color: #d9534f;
             border-color: #d9534f;
             flex-grow: 1;
             font-weight: bold;
+        }
+        
+        #count-result {
+            margin-top: 20px;
+            font-size: 1.5rem;
+            font-weight: bold;
+            color: #333;
         }
     </style>
 </head>
 <body>
     <div class="container-box">
     <h2 class="app-heading">Apple Count</h2>
-    <div class="mb-3">
-        <label for="formFileSm" class="form-label">Select file under 20MB</label>
-        <input class="form-control form-control-sm" id="formFileSm" type="file">
-        
-        <div class="button-group-custom">
-            <button class="btn btn-display" onclick="image_showing()">Show Image</button>
-            <button class="btn btn-count">Count Number</button>
+    <form id="uploadForm" enctype="multipart/form-data">
+        <div class="mb-3">
+            <label for="formFileSm" class="form-label">Select file under 20MB</label>
+            <input class="form-control form-control-sm" id="formFileSm" name="image" type="file" accept="image/*"> 
+            
+            <div class="button-group-custom">
+                <button type="button" class="btn btn-display" onclick="image_showing()">Show Original Image</button> 
+                <button type="submit" class="btn btn-count" onclick="count_apples(event)">Count Apples</button>
+            </div>
         </div>
-    </div>
+    </form>
+    <div id="count-result"></div>
     <div id="imagecontainer"></div>
 </div>
 
 <script>
 function image_showing() {
     let imagecontainer = document.getElementById('imagecontainer');
+    let countResult = document.getElementById('count-result');
     let fileInput = document.getElementById('formFileSm');
     
+    countResult.innerHTML = ''; 
+
     if (fileInput.files && fileInput.files[0]) {
         let reader = new FileReader();
 
         reader.onload = function(e) {
             let img = document.createElement('img');
             img.src = e.target.result;
-            img.style.maxWidth = '300px';
-            img.style.maxHeight = '300px';
-            
+            img.style.maxWidth = '100%';
+            img.style.maxHeight = '300px'; 
+            img.style.marginTop = '20px';
+
             imagecontainer.innerHTML = '';
             imagecontainer.appendChild(img);
         }
 
         reader.readAsDataURL(fileInput.files[0]);
+    } else {
+        imagecontainer.innerHTML = '<p class="text-danger">Please select an image file first.</p>';
+    }
+}
+
+async function count_apples(event) {
+    event.preventDefault();
+    
+    let imagecontainer = document.getElementById('imagecontainer');
+    let countResult = document.getElementById('count-result');
+    let fileInput = document.getElementById('formFileSm');
+    
+    imagecontainer.innerHTML = '<p class="text-info">Processing image...</p>';
+    countResult.innerHTML = '';
+
+    if (!fileInput.files || !fileInput.files[0]) {
+        imagecontainer.innerHTML = '<p class="text-danger">Please select an image file first.</p>';
+        return;
+    }
+
+    const formData = new FormData(document.getElementById('uploadForm'));
+
+    try {
+        const response = await fetch('/upload', {
+            method: 'POST',
+            body: formData,
+        });
+
+        if (!response.ok) {
+            const errorText = await response.text();
+            imagecontainer.innerHTML = `<p class="text-danger">Error: ${errorText}</p>`;
+            return;
+        }
+        
+        const appleCount = response.headers.get('X-Apple-Count');
+        countResult.innerHTML = `<h3>🍎 Total Apples Found: ${appleCount}</h3>`;
+
+        const imageBlob = await response.blob();
+        const imageUrl = URL.createObjectURL(imageBlob);
+
+        let img = document.createElement('img');
+        img.src = imageUrl;
+        img.style.maxWidth = '100%';
+        img.style.maxHeight = '300px'; 
+        img.style.marginTop = '20px';
+
+        imagecontainer.innerHTML = '';
+        imagecontainer.appendChild(img);
+
+    } catch (error) {
+        imagecontainer.innerHTML = `<p class="text-danger">Network or server error: ${error.message}</p>`;
+        console.error('Fetch Error:', error);
     }
 }
 </script>
