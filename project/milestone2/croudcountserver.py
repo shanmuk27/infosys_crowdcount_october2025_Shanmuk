@@ -9,6 +9,12 @@ import cv2
 from werkzeug.utils import secure_filename
 import threading
 import time
+import queue 
+
+STREAM_SOURCES = {} 
+THREAD_RESULTS = {}
+ACTIVE_THREADS = {}
+LIVE_COUNTS = {} 
 
 config = {
     'apiKey': "AIzaSyAHT27Lik4POA67GsBkeVUHWvWYeUqysi4",
@@ -33,24 +39,21 @@ confidence_threshold = 0.4
 iou_threshold = 0.7
 sel = 0
 
-# --- GLOBAL CONTROL VARIABLES FOR THREADING ---
-IS_PROCESSING_VIDEO = False
-IS_PROCESSING_CAMERA = False
-# ----------------------------------------------
-
 def process_frame_results(results_generator):
     if not results_generator:
-        return None
+        return None, 0
         
     try:
         result = next(iter(results_generator))
     except StopIteration:
-        return None
+        return None, 0
     
     if result is None or result.orig_img is None:
-        return None
+        return None, 0
             
     frame = result.orig_img
+    
+    person_count = len(result.boxes)
     
     person_id_counter = 1
     
@@ -72,98 +75,76 @@ def process_frame_results(results_generator):
                       color, -1)
         
         cv2.putText(frame, label, (text_x, text_y), 
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 0), 2)
+                      cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 0), 2)
         
         person_id_counter += 1
 
-    return frame
+    return frame, person_count
 
-# --- NEW THREADING FUNCTIONS ---
-
-def process_video_in_background(video_path, area_name):
-    global IS_PROCESSING_VIDEO
-    IS_PROCESSING_VIDEO = True
-
-    try:
-        results_generator = model.predict(
-            source=video_path,
-            classes=[person_class_id], 
-            conf=confidence_threshold,
-            iou=iou_threshold,
-            stream=True,
-            verbose=False,
-            # tracker='bytetrack.yaml' # Keep tracker disabled for simple streaming
-        )
-        
-        # NOTE: cv2.imshow requires a loop and cv2.waitKey on the main thread for optimal performance.
-        # Running it in a thread might cause issues depending on your OS/GUI backend, but we proceed.
-        for result in results_generator:
-            if not IS_PROCESSING_VIDEO:
-                break
-            
-            processed_frame = process_frame_results([result])
-            if processed_frame is not None:
-                cv2.imshow(f"Video Analysis: {area_name}", processed_frame)
-                
-                # Check for 'q' key press to stop processing
-                if cv2.waitKey(1) & 0xFF == ord('q'):
-                    break
-            
-            # Simple delay to prevent overwhelming the display loop
-            time.sleep(0.01) 
-            
-    except Exception as e:
-        print(f"Error during video processing: {e}")
-        
-    finally:
-        IS_PROCESSING_VIDEO = False
-        cv2.destroyAllWindows()
-        print(f"Finished processing video: {video_path} for {area_name}")
-
-def process_camera_in_background(area_name):
-    global IS_PROCESSING_CAMERA
-    IS_PROCESSING_CAMERA = True
+def video_stream_generator(source, area_name):
+    global LIVE_COUNTS, STREAM_SOURCES
     
-    cap = cv2.VideoCapture(0)
+    if source == "0":
+        cap = cv2.VideoCapture(0)
+    else:
+        cap = cv2.VideoCapture(source)
+
     if not cap.isOpened():
-        print("Cannot open camera.")
-        IS_PROCESSING_CAMERA = False
+        print(f"Error: Cannot open source for {area_name}")
+        LIVE_COUNTS[area_name] = 0
         return
-        
+
+    frame_count = 0
+    final_count = 0
+    
     try:
-        while IS_PROCESSING_CAMERA:
+        while True:
+            if area_name not in STREAM_SOURCES:
+                break
+                
             ret, frame = cap.read()
             if not ret:
-                print("Failed to capture frame from camera.")
                 break
-                
+
             results = model.predict(
                 source=frame,
                 classes=[person_class_id], 
                 conf=confidence_threshold,
                 iou=iou_threshold,
-                stream=False,
+                stream=False, 
                 verbose=False,
             )
-            
-            processed_frame = process_frame_results(results)
-            
-            if processed_frame is not None:
-                cv2.imshow(f"Live Camera Analysis: {area_name}", processed_frame)
-            
-            if cv2.waitKey(1) & 0xFF == ord('q'):
-                break
 
+            processed_frame, current_count = process_frame_results(results)
+
+            if processed_frame is not None:
+                LIVE_COUNTS[area_name] = current_count 
+                
+                ret, buffer = cv2.imencode('.jpg', processed_frame)
+                frame_bytes = buffer.tobytes()
+                
+                yield (b'--frame\r\n'
+                       b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
+                
+                final_count = current_count 
+                frame_count += 1
+                
     except Exception as e:
-        print(f"Error during camera processing: {e}")
+        print(f"Streaming error for {area_name}: {e}")
+        THREAD_RESULTS[area_name] = f"Error: {e}"
         
     finally:
-        IS_PROCESSING_CAMERA = False
         cap.release()
-        cv2.destroyAllWindows()
-        print(f"Finished processing camera for {area_name}")
+        
+        if area_name in STREAM_SOURCES:
+            del STREAM_SOURCES[area_name]
+            
+        if area_name in LIVE_COUNTS:
+            del LIVE_COUNTS[area_name]
+            
+        THREAD_RESULTS[area_name] = f"Stream ended. Total frames processed: {frame_count}. Last count: {final_count}"
+        print(f"Finished processing and stored result for {area_name}: {THREAD_RESULTS[area_name]}")
 
-# ----------------------------------------------
 
 app = Flask(__name__)
 app.secret_key = 'a-very-secret-key'
@@ -174,7 +155,7 @@ def get_user_data(uid, id_token):
     return db.child("user").child(uid).get(id_token).val()
 
 def generate_server_jwt(uid, email, username):
-    current_time = datetime.datetime.utcnow()
+    current_time = datetime.datetime.now(datetime.UTC) 
     payload = {
         "uid": uid,
         "email": email,
@@ -281,7 +262,17 @@ def home():
 
 @app.route('/vid_analy')
 def vid_analy():
-    return render_template("vid_analy.html")
+    decoded = check_auth(request)
+    if not decoded:
+        return redirect(url_for('signin'))
+        
+    camera_data = [
+        {'areaName': name, 'sourceType': 'Webcam' if STREAM_SOURCES[name] == '0' else 'Video File'}
+        for name in STREAM_SOURCES.keys()
+    ]
+
+    return render_template("vid_analy.html", cameras=camera_data)
+
 
 @app.route('/cam_manage', methods=['GET'])
 def cam_manage_page():
@@ -290,19 +281,40 @@ def cam_manage_page():
         return redirect(url_for('signin'))
     return render_template("cam_manage.html")
 
+@app.route('/video_feed/<area_name>')
+def video_feed(area_name):
+    source = STREAM_SOURCES.get(area_name)
+    if not source:
+        return "No active stream for this area.", 404
+
+    return Response(
+        video_stream_generator(source, area_name),
+        mimetype='multipart/x-mixed-replace; boundary=frame'
+    )
+
+@app.route('/get_count/<area_name>', methods=['GET'])
+def get_count(area_name):
+    current_count = LIVE_COUNTS.get(area_name, "N/A")
+    is_active = area_name in STREAM_SOURCES
+    
+    return jsonify({
+        "areaName": area_name,
+        "count": current_count,
+        "isActive": is_active
+    })
+
+
 @app.route('/upload_video', methods=['POST'])
 def upload_video():
-    global IS_PROCESSING_VIDEO, IS_PROCESSING_CAMERA
-    
-    if IS_PROCESSING_VIDEO or IS_PROCESSING_CAMERA:
-        return jsonify({"message": "A video or camera process is already running."}), 409
-        
     if "video" not in request.files:
         return jsonify({"error": "No video file uploaded"}), 400
 
     video_file = request.files["video"]
     area_name = request.form.get("areaName", "Unknown")
     
+    if area_name in STREAM_SOURCES:
+        return jsonify({"message": f"A stream is already active for {area_name}. Stop it first."}), 409
+        
     filename = secure_filename(video_file.filename)
     full_path = os.path.join(UPLOAD_FOLDER, filename)
     video_file.save(full_path)
@@ -310,51 +322,43 @@ def upload_video():
     if not os.path.exists(full_path):
         return jsonify({"error": f"Failed to save video at: {full_path}"}), 500
 
-    # START PROCESSING IN A BACKGROUND THREAD
-    threading.Thread(target=process_video_in_background, args=(full_path, area_name)).start()
+    STREAM_SOURCES[area_name] = full_path
+    LIVE_COUNTS[area_name] = 0
     
-    # Return immediately to the client so the web app doesn't block
-    return jsonify({"message": f"Video processing started on server for {area_name}. Check the display window."}), 200
+    return jsonify({"message": f"Video source saved for {area_name}. Stream will start on dashboard view."}), 200
 
 @app.route('/upload_cam', methods=['POST'])
 def upload_cam():
-    global IS_PROCESSING_CAMERA, IS_PROCESSING_VIDEO
-    
-    if IS_PROCESSING_CAMERA or IS_PROCESSING_VIDEO:
-        return jsonify({"message": "A camera or video process is already running."}), 409
-
     area_name = request.form.get("areaName", "Unknown")
     
-    # START PROCESSING IN A BACKGROUND THREAD
-    threading.Thread(target=process_camera_in_background, args=(area_name,)).start()
+    if area_name in STREAM_SOURCES:
+        return jsonify({"message": f"A stream is already active for {area_name}. Stop it first."}), 409
 
-    # Return immediately to the client so the web app doesn't block
-    return jsonify({"message": f"Camera stream initiated on server for {area_name}. Check the display window."}), 200
+    STREAM_SOURCES[area_name] = "0"
+    LIVE_COUNTS[area_name] = 0
+
+    return jsonify({"message": f"Camera source saved for {area_name}. Stream will start on dashboard view."}), 200
 
 @app.route('/stop_stream', methods=['POST'])
 def stop_stream():
-    global IS_PROCESSING_VIDEO, IS_PROCESSING_CAMERA
+    area_name = request.json.get("areaName")
     
-    if not IS_PROCESSING_VIDEO and not IS_PROCESSING_CAMERA:
-        return jsonify({"message": "No stream is currently active."}), 200
+    if area_name in STREAM_SOURCES:
+        if area_name in STREAM_SOURCES:
+            del STREAM_SOURCES[area_name]
         
-    # Set the global flags to False to break the loops in the background threads
-    IS_PROCESSING_VIDEO = False
-    IS_PROCESSING_CAMERA = False
+        message = f"Stream stop signal sent for {area_name}."
+    else:
+        message = "No active stream found to stop."
     
-    # Give the thread a moment to shut down and close the windows
-    time.sleep(1) 
-    cv2.destroyAllWindows() 
-    return jsonify({"message": "Video/Camera processing stopped on server."}), 200
+    return jsonify({"message": message}), 200
 
 
 @app.route('/signout')
 def signout():
-    global IS_PROCESSING_VIDEO, IS_PROCESSING_CAMERA
-    
-    # Ensure any running processes are terminated on signout
-    IS_PROCESSING_VIDEO = False
-    IS_PROCESSING_CAMERA = False
+    global STREAM_SOURCES, LIVE_COUNTS
+    STREAM_SOURCES = {}
+    LIVE_COUNTS = {}
     cv2.destroyAllWindows()
     
     session.pop('user', None)
@@ -363,5 +367,4 @@ def signout():
     return response
 
 if __name__ == '__main__':
-    # Running with 'threaded=True' is essential for this approach
     app.run(debug=True, threaded=True)

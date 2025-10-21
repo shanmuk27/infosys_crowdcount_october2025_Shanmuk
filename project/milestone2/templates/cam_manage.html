@@ -215,6 +215,11 @@
             const sourceType = sourceTypeSelect.value;
             let sourceDetail = null;
 
+            // 💡 FIX: Declare and initialize formData here so it's available 
+            //         for both 'file' and 'webcam' cases.
+            const formData = new FormData(); 
+            formData.append("areaName", areaName); // Add areaName for both cases
+
             if (sourceType === "file") {
                 const file = streamFileInput.files[0];
                 if (!file) {
@@ -224,9 +229,8 @@
                 sourceDetail = file.name;
 
                 // Upload video to Flask
-                const formData = new FormData();
-                formData.append("video", file);
-                formData.append("areaName", areaName);
+                // 💡 formData is now defined
+                formData.append("video", file); 
 
                 try {
                     const response = await fetch("/upload_video", { method: "POST", body: formData });
@@ -240,9 +244,12 @@
                 }
             } else {
                 sourceDetail = "Live Webcam Feed (Device ID: 1)";
-                //upload the webcam to the flask
-                formData.append("areaName", areaName);
+                
+                // upload the webcam to the flask
+                // 💡 formData is now defined, and areaName was added outside the if/else
                 try {
+                    // Note: For a live webcam, you'd typically send a configuration, not a video file. 
+                    // The existing formData (which includes areaName) is sufficient for a config post.
                     const response = await fetch("/upload_cam", { method: "POST", body: formData });
                     if (response.ok) {
                         console.log("cam signal sent!");

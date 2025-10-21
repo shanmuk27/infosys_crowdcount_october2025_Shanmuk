@@ -4,8 +4,94 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Document</title>
+    <style>
+        .camera-grid-container{
+            width: 30%;
+            display: flex;
+        }
+        #Analysis_hedding{
+            font-family: 'Gill Sans', 'Gill Sans MT', Calibri, 'Trebuchet MS', sans-serif;
+            color: coral;
+        }
+    </style>
 </head>
 <body>
-    Video analysis
-</body>
+    <div class="main-container">
+        <h2 id="Analysis_hedding">Video Analysis Dashboard</h2>
+        
+        <div class="camera-grid-container">
+            {% if cameras %}
+                {% for cam in cameras %}
+                <div class="cam-card" data-area-name="{{ cam.areaName }}">
+                    <h3>{{ cam.areaName }}</h3> 
+                    <p>Source Type: {{ cam.sourceType }}</p>
+                    
+                    <img src="{{ url_for('video_feed', area_name=cam.areaName) }}" 
+                        alt="Live Analysis Stream" 
+                        style="width: 100%; border-radius: 8px;">
+                    
+                    <div style="background-color: #f0fdf4; padding: 0.75rem; border-radius: 0.5rem; margin-top: 1rem;">
+                        <span style="font-size: 0.875rem; font-weight: 700; color: #059669;">
+                            Status: Live
+                        </span>
+                        <div style="font-size: 1.5rem; font-weight: 800; color: #4f46e5; margin-top: 0.5rem;">
+                            Current Crowd: <span id="count-{{ cam.areaName }}">--</span>
+                        </div>
+                    </div>
+                </div>
+                {% endfor %}
+            {% else %}
+                <p>No active analysis streams available. Add a camera or video on the Cam Management page.</p>
+            {% endif %}
+        </div>
+    </div>
+
+    <script>
+        const cameraData = JSON.parse('{{ cameras | tojson | safe }}'); 
+        const pollingIntervals = {}; 
+
+        async function pollCount(areaName) {
+            try {
+                const response = await fetch(`/get_count/${areaName}`);
+                const data = await response.json();
+                
+                const countElement = document.getElementById(`count-${areaName}`);
+                
+                if (countElement) {
+                    countElement.textContent = data.count;
+                }
+
+                // Stop polling if the stream is no longer active
+                if (!data.isActive) {
+                    clearInterval(pollingIntervals[areaName]);
+                    const statusElement = document.querySelector(`.cam-card[data-area-name="${areaName}"] .live-status span`);
+                    if (statusElement) statusElement.textContent = "Stream Ended";
+                    console.log(`Polling stopped for ${areaName}.`);
+                }
+            } catch (error) {
+                console.error(`Error fetching count for ${areaName}:`, error);
+            }
+        }
+
+        function startPolling() {
+            if (!cameraData || cameraData.length === 0) return;
+            
+            cameraData.forEach(cam => {
+                // Start polling every 500ms for a quick update rate
+                const interval = setInterval(() => {
+                    pollCount(cam.areaName);
+                }, 500); 
+                pollingIntervals[cam.areaName] = interval;
+                
+                // Initial fetch
+                pollCount(cam.areaName); 
+            });
+        }
+        window.addEventListener('beforeunload', () => {
+            Object.values(pollingIntervals).forEach(clearInterval);
+        });
+
+        window.onload = startPolling;
+    </script>
+ </body>
 </html>
