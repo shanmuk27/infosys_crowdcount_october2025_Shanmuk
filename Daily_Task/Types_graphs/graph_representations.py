@@ -1,5 +1,6 @@
 # Using Matplotlib
 import matplotlib.pyplot as plt
+import pandas
 
 x = [10, 20, 30, 40]
 y = [20, 25, 35, 55]

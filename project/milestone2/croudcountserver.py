@@ -11,9 +11,12 @@ import threading
 import time
 import queue 
 
+# NEW Global State for persistent processing
+FRAME_QUEUES = {} 
+ACTIVE_THREADS = {} 
+
 STREAM_SOURCES = {} 
 THREAD_RESULTS = {}
-ACTIVE_THREADS = {}
 LIVE_COUNTS = {} 
 
 config = {
@@ -81,30 +84,27 @@ def process_frame_results(results_generator):
 
     return frame, person_count
 
-def video_stream_generator(source, area_name):
-    global LIVE_COUNTS, STREAM_SOURCES
+def continuous_video_analysis(source, area_name):
+    global LIVE_COUNTS, FRAME_QUEUES, ACTIVE_THREADS, STREAM_SOURCES
     
-    if source == "0":
-        cap = cv2.VideoCapture(0)
-    else:
-        cap = cv2.VideoCapture(source)
+    cap = cv2.VideoCapture(int(source) if source == "0" else source)
 
     if not cap.isOpened():
         print(f"Error: Cannot open source for {area_name}")
-        LIVE_COUNTS[area_name] = 0
+        if area_name in STREAM_SOURCES: del STREAM_SOURCES[area_name]
+        if area_name in LIVE_COUNTS: del LIVE_COUNTS[area_name]
+        if area_name in FRAME_QUEUES: del FRAME_QUEUES[area_name]
+        if area_name in ACTIVE_THREADS: del ACTIVE_THREADS[area_name]
         return
 
     frame_count = 0
-    final_count = 0
     
     try:
-        while True:
-            if area_name not in STREAM_SOURCES:
-                break
-                
+        while area_name in STREAM_SOURCES: 
             ret, frame = cap.read()
             if not ret:
-                break
+                print(f"Stream ended for {area_name} (End of source).")
+                break 
 
             results = model.predict(
                 source=frame,
@@ -123,27 +123,69 @@ def video_stream_generator(source, area_name):
                 ret, buffer = cv2.imencode('.jpg', processed_frame)
                 frame_bytes = buffer.tobytes()
                 
-                yield (b'--frame\r\n'
-                       b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
-                
-                final_count = current_count 
+                try:
+                    FRAME_QUEUES[area_name].put_nowait(frame_bytes)
+                except queue.Full:
+                    print(f"Warning: Dropped frame for {area_name} (Queue full).")
+
                 frame_count += 1
                 
     except Exception as e:
-        print(f"Streaming error for {area_name}: {e}")
+        print(f"Continuous analysis error for {area_name}: {e}")
         THREAD_RESULTS[area_name] = f"Error: {e}"
         
     finally:
         cap.release()
         
         if area_name in STREAM_SOURCES:
-            del STREAM_SOURCES[area_name]
-            
+            del STREAM_SOURCES[area_name] 
         if area_name in LIVE_COUNTS:
             del LIVE_COUNTS[area_name]
+        if area_name in FRAME_QUEUES:
+            del FRAME_QUEUES[area_name]
+        if area_name in ACTIVE_THREADS:
+            del ACTIVE_THREADS[area_name]
             
-        THREAD_RESULTS[area_name] = f"Stream ended. Total frames processed: {frame_count}. Last count: {final_count}"
-        print(f"Finished processing and stored result for {area_name}: {THREAD_RESULTS[area_name]}")
+        THREAD_RESULTS[area_name] = f"Analysis thread ended. Frames processed: {frame_count}."
+        print(f"Finished processing and stored result for {area_name}")
+
+def video_feed_generator(area_name):
+    global FRAME_QUEUES
+    
+    if area_name not in FRAME_QUEUES:
+        return
+
+    q = FRAME_QUEUES[area_name]
+    
+    while area_name in STREAM_SOURCES: 
+        try:
+            frame_bytes = q.get(timeout=0.1) 
+            
+            yield (b'--frame\r\n'
+                   b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
+            
+            q.task_done()
+            
+        except queue.Empty:
+            continue
+        except Exception as e:
+            print(f"Video feed error for {area_name}: {e}")
+            break
+
+def start_stream_thread(area_name, source_path):
+    global STREAM_SOURCES, FRAME_QUEUES, ACTIVE_THREADS
+    
+    STREAM_SOURCES[area_name] = source_path
+    LIVE_COUNTS[area_name] = 0
+    FRAME_QUEUES[area_name] = queue.Queue(maxsize=5) 
+    
+    thread = threading.Thread(
+        target=continuous_video_analysis, 
+        args=(source_path, area_name),
+        daemon=True 
+    )
+    thread.start()
+    ACTIVE_THREADS[area_name] = thread
 
 
 app = Flask(__name__)
@@ -257,8 +299,12 @@ def home():
     decoded = check_auth(request)
     if not decoded:
         return redirect(url_for('signin'))
+    camera_data = [
+        {'areaName': name, 'sourceType': 'Webcam' if STREAM_SOURCES[name] == '0' else 'Video File'}
+        for name in STREAM_SOURCES.keys()
+    ]
     
-    return render_template('home.html')
+    return render_template('home.html', cameras=camera_data)
 
 @app.route('/vid_analy')
 def vid_analy():
@@ -285,12 +331,24 @@ def cam_manage_page():
 def video_feed(area_name):
     source = STREAM_SOURCES.get(area_name)
     if not source:
-        return "No active stream for this area.", 404
+        return "No active stream for this area. It might have stopped automatically.", 404
 
     return Response(
-        video_stream_generator(source, area_name),
+        video_feed_generator(area_name),
         mimetype='multipart/x-mixed-replace; boundary=frame'
     )
+
+@app.route('/get_total_count', methods=['GET'])
+def get_total_count():
+    total_count = 0
+    for count in LIVE_COUNTS.values():
+        if isinstance(count, int):
+            total_count += count
+            
+    return jsonify({
+        "totalCount": total_count,
+        "activeStreams": len(STREAM_SOURCES)
+    })
 
 @app.route('/get_count/<area_name>', methods=['GET'])
 def get_count(area_name):
@@ -322,10 +380,9 @@ def upload_video():
     if not os.path.exists(full_path):
         return jsonify({"error": f"Failed to save video at: {full_path}"}), 500
 
-    STREAM_SOURCES[area_name] = full_path
-    LIVE_COUNTS[area_name] = 0
+    start_stream_thread(area_name, full_path)
     
-    return jsonify({"message": f"Video source saved for {area_name}. Stream will start on dashboard view."}), 200
+    return jsonify({"message": f"Video source saved and processing started for {area_name}."}), 200
 
 @app.route('/upload_cam', methods=['POST'])
 def upload_cam():
@@ -334,20 +391,24 @@ def upload_cam():
     if area_name in STREAM_SOURCES:
         return jsonify({"message": f"A stream is already active for {area_name}. Stop it first."}), 409
 
-    STREAM_SOURCES[area_name] = "0"
-    LIVE_COUNTS[area_name] = 0
+    webcam_source = "0" 
+    
+    start_stream_thread(area_name, webcam_source)
 
-    return jsonify({"message": f"Camera source saved for {area_name}. Stream will start on dashboard view."}), 200
+    return jsonify({"message": f"Camera source saved and processing started for {area_name}."}), 200
 
 @app.route('/stop_stream', methods=['POST'])
 def stop_stream():
+    global STREAM_SOURCES, LIVE_COUNTS, FRAME_QUEUES, ACTIVE_THREADS
     area_name = request.json.get("areaName")
     
     if area_name in STREAM_SOURCES:
-        if area_name in STREAM_SOURCES:
-            del STREAM_SOURCES[area_name]
+        del STREAM_SOURCES[area_name]
         
-        message = f"Stream stop signal sent for {area_name}."
+        if area_name in LIVE_COUNTS: del LIVE_COUNTS[area_name]
+        if area_name in FRAME_QUEUES: del FRAME_QUEUES[area_name]
+        
+        message = f"Stream stop signal sent for {area_name}. Analysis thread will terminate shortly."
     else:
         message = "No active stream found to stop."
     
@@ -356,9 +417,14 @@ def stop_stream():
 
 @app.route('/signout')
 def signout():
-    global STREAM_SOURCES, LIVE_COUNTS
-    STREAM_SOURCES = {}
-    LIVE_COUNTS = {}
+    global STREAM_SOURCES, LIVE_COUNTS, FRAME_QUEUES, ACTIVE_THREADS
+    
+    active_streams = list(STREAM_SOURCES.keys())
+    for area_name in active_streams:
+        if area_name in STREAM_SOURCES: del STREAM_SOURCES[area_name]
+        if area_name in LIVE_COUNTS: del LIVE_COUNTS[area_name]
+        if area_name in FRAME_QUEUES: del FRAME_QUEUES[area_name]
+        
     cv2.destroyAllWindows()
     
     session.pop('user', None)

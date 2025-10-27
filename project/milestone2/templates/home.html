@@ -121,7 +121,7 @@
         </div>
         <div class="live-count-container-top-right">
             <span>Live Count: </span>
-            <span class="live-count-number-display">128</span>
+            <span class="live-count-number-display">--</span>
             <div class="blinking-dot"></div>
         </div>
     </div>
@@ -175,37 +175,34 @@
         </div>
 
         <div class="graph-container">
-            <h2>Live Crowd Trend (Last 10 minutes)</h2>
+            <h2>Live Crowd Trend</h2>
             <canvas id="liveCrowdChart"></canvas>
         </div>
 
     </div>
 
     <script>
-        // --- Live Count Blinking Dot
-
-        // --- Live Crowd Chart ---
         const ctx = document.getElementById('liveCrowdChart').getContext('2d');
         const liveCrowdChart = new Chart(ctx, {
             type: 'line',
             data: {
-                labels: [], // Will be filled with time labels
+                labels: [], 
                 datasets: [{
                     label: 'Total Crowd Count',
-                    data: [], // Will be filled with crowd data
-                    backgroundColor: 'rgba(4, 170, 109, 0.2)', // Light green
-                    borderColor: 'rgba(4, 170, 109, 1)', // Darker green
+                    data: [], 
+                    backgroundColor: 'rgba(4, 170, 109, 0.2)', 
+                    borderColor: 'rgba(4, 170, 109, 1)', 
                     borderWidth: 2,
-                    tension: 0.3, // Makes the line slightly curved
+                    tension: 0.3, 
                     fill: true,
                 }]
             },
             options: {
                 responsive: true,
-                maintainAspectRatio: false, // Allows the graph to fill its container height
+                maintainAspectRatio: false, 
                 scales: {
                     x: {
-                        type: 'category', // For time labels
+                        type: 'category', 
                         title: {
                             display: true,
                             text: 'Time'
@@ -231,38 +228,94 @@
                 }
             }
         });
+        
+        const cameraData = JSON.parse('{{ cameras | tojson | safe }}');
 
-        // Function to simulate fetching live data and updating the chart
-        function updateLiveChart() {
-            const maxDataPoints = 10; // Show last 10 minutes/data points
-            const now = new Date();
-            const timeLabel = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+        const pollingIntervals = {};
+        
+        // Function to fetch count data for a single camera area (still useful for future card updates)
+        async function pollCount(areaName) {
+            try {
+                const response = await fetch(`/get_count/${areaName}`);
+                const data = await response.json();
 
-            // Simulate a new crowd count (replace with actual data fetching later)
-            // For now, let's make it fluctuate around the existing 128
-            const newCrowdCount = 128 + Math.floor(Math.random() * 21) - 10; // Random number between 118 and 138
+                console.log(`Area: ${areaName}, Count: ${data.count}, Active: ${data.isActive}`);
 
-            // Update Live Count display in top bar
-            document.querySelector('.live-count-number-display').textContent = newCrowdCount;
-
-            // Add new data to the chart
-            liveCrowdChart.data.labels.push(timeLabel);
-            liveCrowdChart.data.datasets[0].data.push(newCrowdCount);
-
-            // Keep only the latest 'maxDataPoints'
-            if (liveCrowdChart.data.labels.length > maxDataPoints) {
-                liveCrowdChart.data.labels.shift();
-                liveCrowdChart.data.datasets[0].data.shift();
+                if (!data.isActive) {
+                    clearInterval(pollingIntervals[areaName]);
+                    console.log(`Polling stopped for ${areaName}.`);
+                }
+            } catch (error) {
+                console.error(`Error fetching count for ${areaName}:`, error);
             }
+        }
+        async function fetchTotalCount() {
+            try {
+                const response = await fetch('/get_total_count');
+                const data = await response.json();
+                const totalCount = data.totalCount;
 
-            liveCrowdChart.update(); // Redraw the chart
+                document.querySelector('.live-count-number-display').textContent = totalCount;
+                
+                return totalCount;
+
+            } catch (error) {
+                console.error('Error fetching total count:', error);
+                return null;
+            }
+        }
+        
+        // Function to update the chart with the new total count
+        function updateLiveChart() {
+            const maxDataPoints = 10; 
+
+            // 1. Fetch the total count
+            fetchTotalCount().then(newCrowdCount => {
+                if (newCrowdCount === null) return;
+
+                const now = new Date();
+                const timeLabel = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+
+                // 2. Add new data to the chart
+                liveCrowdChart.data.labels.push(timeLabel);
+                liveCrowdChart.data.datasets[0].data.push(newCrowdCount);
+
+                // 3. Keep only the latest 'maxDataPoints'
+                if (liveCrowdChart.data.labels.length > maxDataPoints) {
+                    liveCrowdChart.data.labels.shift();
+                    liveCrowdChart.data.datasets[0].data.shift();
+                }
+
+                liveCrowdChart.update(); // Redraw the chart
+            });
         }
 
-        // Update the chart every 5 seconds (5000 milliseconds)
-        setInterval(updateLiveChart, 5000);
+        function startPolling() {
+            if (cameraData && cameraData.length > 0) {
+                cameraData.forEach(cam => {
+                    const interval = setInterval(() => {
+                        pollCount(cam.areaName);
+                    }, 500);
+                    pollingIntervals[cam.areaName] = interval;
+                    pollCount(cam.areaName);
+                });
+            }
+            
+            setInterval(updateLiveChart, 5000);
+        }
 
-        // Initial chart update when the page loads
-        updateLiveChart(); 
+        // Clear intervals when page unloads
+        window.addEventListener('beforeunload', () => {
+            Object.values(pollingIntervals).forEach(clearInterval);
+        });
+
+        // Start polling when page loads
+        window.onload = () => {
+            // Initial update of the top-right count immediately
+            fetchTotalCount(); 
+            startPolling();
+            // The chart update is already part of startPolling with an interval
+        };
     </script>
 </body>
 </html>

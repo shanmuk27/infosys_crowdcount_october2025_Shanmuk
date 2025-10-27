@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Crowd Count - Sign In</title>
+    <style>
+        body,html{ height: 100%; margin: 0; display: flex; justify-content: center; align-items: center; background-color: #f4f4f9; font-family: Arial, sans-serif; }
+        form { padding: 30px; background-color: #ffffff; display: flex; flex-direction: column; gap: 15px; border-radius: 10px; box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1); width: 320px; }
+        .form-label { font-size: 15px; color: #333; margin-bottom: 5px; }
+        .form-control { font-size: 16px; padding: 8px; border: 1px solid #ddd; border-radius: 6px; outline: none; width: 100%; box-sizing: border-box; }
+        .form-control:focus { border-color: #888; box-shadow: 0 0 4px rgba(0, 0, 0, 0.1); }
+        #submit { background-color: #4a90e2; font-size: 16px; color: white; border: none; padding: 10px; border-radius: 6px; cursor: pointer; transition: background 0.3s ease; display: block; margin: 0 auto; }
+        #submit:hover { background-color: #357ab8; }
+        a { color: #4a90e2; text-decoration: none; font-weight: bold; }
+        a:hover { text-decoration: underline; }
+        .extra-text { font-size: 14px; color: #555; text-align: center; }
+        #register_h,#login_h{ font-size: 18px; }
+        .error-message {
+            color: red;
+            font-size: 13px;
+            text-align: center;
+            margin-top: -5px;
+            margin-bottom: 10px;
+        }
+    </style>
+</head>
+<body>
+    <form method="POST" action="/signin"> <div class="extra-text" id="register_h">Register</div>
+        <div class="extra-text" id="login_h">Login</div>
+        <div class="mb-3">
+            <label for="mail" class="form-label">Email</label>
+            <input id="mail" type="email" class="form-control" name="email" placeholder="Enter your email" required>
+        </div>
+        <div class="mb-3">
+            <label for="password" class="form-label">Password</label>
+            <input id="password" type="password" class="form-control" name="password" placeholder="Enter your password" required>
+        </div>
+        <div id="user_name">
+            <label for="user_name_input" class="form-label">User name</label>
+            <input type="text" class="form-control" name="username" id="user_name_input" placeholder="Enter User name">
+        </div>
+        <div class="error-message" id="errorMessage">{{Error}}</div>
+        <div><button type="submit" id="submit">Submit</button></div>
+        <div class="extra-text" id="register">Don't have an account? <a href="#" onclick="detailsChange()">Register</a></div>
+        <div class="extra-text" id="login">Have an account? <a href="#" onclick="detailsChange()">Login</a></div>
+    </form>
+
+    <script>
+        const login = document.getElementById("login");
+        const register = document.getElementById("register");
+        const login_h = document.getElementById("login_h");
+        const register_h = document.getElementById("register_h");
+        const user_name_div = document.getElementById("user_name");
+        const form = document.querySelector('form');
+        const error_message = document.getElementById("errorMessage")
+
+        function setupForLogin() {
+            register_h.style.display = "none";
+            user_name_div.style.display = "none";
+            register.style.display = "block";
+            login.style.display = "none";
+            login_h.style.display = "block";
+            form.action = "/login";
+        }
+
+        function setupForRegister() {
+            register_h.style.display = "block";
+            user_name_div.style.display = "block";
+            register.style.display = "none";
+            login.style.display = "block";
+            login_h.style.display = "none";
+            form.action = "/register";
+        }
+
+        function detailsChange() {
+            error_message.style.display = "none";
+            (register_h.style.display === "none") 
+                ? setupForRegister() 
+                : setupForLogin();
+        }
+        setupForLogin();
+
+        const initialMode = "{{ mode }}";
+        if (initialMode === 'register') {
+            setupForRegister();
+        } else {
+            setupForLogin();
+        }
+    </script>
+</body>
+</html>
