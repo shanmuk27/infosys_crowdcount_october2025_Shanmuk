@@ -103,7 +103,13 @@
                 </div>
 
                 <div class="form-group">
-                    <label for="sourceType" class="form-label">2. Input Source Type</label>
+                    <label for="capacityThreshold" class="form-label">2. Capacity Threshold (Alert Above This Count)</label>
+                    <input type="number" id="capacityThreshold" required
+                           class="form-input"
+                           placeholder="Enter max capacity threshold" min="1">
+                </div>
+                <div class="form-group">
+                    <label for="sourceType" class="form-label">3. Input Source Type</label>
                     <select id="sourceType" class="form-input" onchange="updateSourceFields()" required>
                         <option value="file">Video File Upload</option>
                         <option value="webcam">Live Webcam Stream</option>
@@ -135,7 +141,6 @@
     </div>
 
     <script>
-        // Use Local Storage to persist the list
         let cameraList = JSON.parse(localStorage.getItem('cameraList')) || []; 
 
         const addCamModal = document.getElementById('addCamModal');
@@ -146,13 +151,12 @@
         const emptyStateEl = document.getElementById('emptyState');
         const areaNameInput = document.getElementById('areaName');
         const streamFileInput = document.getElementById('streamFile');
+        const capacityThresholdInput = document.getElementById('capacityThreshold'); 
 
-        // Function to save the list to Local Storage
         function saveCameraList() {
             localStorage.setItem('cameraList', JSON.stringify(cameraList));
         }
 
-        // Modal Toggle
         function toggleAddModal() {
             addCamModal.classList.toggle('show');
             if (addCamModal.classList.contains('show')) {
@@ -161,7 +165,6 @@
             }
         }
 
-        // Update source input fields
         function updateSourceFields() {
             const selectedSource = sourceTypeSelect.value;
             if (selectedSource === 'file') {
@@ -176,10 +179,10 @@
             }
         }
 
-        // Render camera cards
         function renderCameras() {
             cameraListEl.innerHTML = '';
             if (cameraList.length === 0) {
+                cameraListEl.appendChild(emptyStateEl); 
                 emptyStateEl.style.display = 'block';
                 return;
             }
@@ -191,9 +194,11 @@
                         <h3 style="font-size: 1.25rem; font-weight: 600; color: #1f2937; margin-bottom: 0.5rem;">
                             ${cam.areaName}
                         </h3>
-                        <p style="font-size: 0.875rem; color: #6b7280; margin-bottom: 1rem;">
+                        <p style="font-size: 0.875rem; color: #6b7280; margin-bottom: 0.5rem;">
                             Source: <span style="font-weight: 500;">${cam.sourceType === 'file' ? 'Video File' : 'Webcam'}</span>
-                            <br>Details: <span style="font-weight: 500; font-size: 0.8rem;">${cam.sourceDetail}</span>
+                        </p>
+                        <p style="font-size: 0.875rem; color: #6b7280; margin-bottom: 1rem;">
+                            Threshold: <span style="font-weight: 500; color: #cc6600;">${cam.capacityThreshold} people</span>
                         </p>
                         <div style="background-color: #eef2ff; padding: 0.75rem; border-radius: 0.5rem; display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
                             <span style="font-size: 0.875rem; font-weight: 500; color: #4338ca;">Mock Count:</span>
@@ -213,10 +218,10 @@
             });
         }
 
-        // Save camera and upload if needed
         async function handleFormSubmit(event) {
             event.preventDefault();
             const areaName = areaNameInput.value.trim();
+            const capacityThreshold = capacityThresholdInput.value.trim(); 
             const sourceType = sourceTypeSelect.value;
             let sourceDetail = null;
 
@@ -227,6 +232,7 @@
 
             const formData = new FormData(); 
             formData.append("areaName", areaName); 
+            formData.append("capacityThreshold", capacityThreshold); 
 
             let endpoint = "";
 
@@ -265,22 +271,31 @@
             const newCamera = {
                 id: 'cam-' + Date.now(),
                 areaName: areaName,
+                capacityThreshold: parseInt(capacityThreshold), 
                 sourceType: sourceType,
                 sourceDetail: sourceDetail
             };
 
             cameraList.push(newCamera);
-            saveCameraList(); // Save the updated list
+            saveCameraList();
             toggleAddModal();
             renderCameras();
             alert(`Camera for "${areaName}" added and processing started.`);
         }
 
-        // Delete camera
+        function defineAOI(id, name) {
+            const cam = cameraList.find(c => c.id === id);
+            if (cam) {
+                window.location.href = `/define_aoi/${name}`;
+            } else {
+                alert("Camera not found in local list.");
+            }
+        }
+
+
         async function deleteCamera(id, name) {
             if (confirm(`Are you sure you want to remove and stop the stream for "${name}"?`)) {
                 
-                // 1. Send stop signal to Flask server
                 try {
                     const response = await fetch('/stop_stream', {
                         method: 'POST',
@@ -290,7 +305,6 @@
                     
                     if (!response.ok) {
                         alert(`Failed to send stop signal to server for ${name}.`);
-                        // Proceed with client-side deletion anyway if the error is non-critical
                     } else {
                         console.log(`Stop signal sent successfully for ${name}.`);
                     }
@@ -299,20 +313,13 @@
                     alert("An error occurred while trying to stop the server stream.");
                 }
 
-                // 2. Remove from client-side list and Local Storage
                 cameraList = cameraList.filter(c => c.id !== id);
-                saveCameraList(); // Update Local Storage
+                saveCameraList();
                 renderCameras();
                 alert(`Camera "${name}" has been removed and stream stopped.`);
             }
         }
 
-        // Placeholder for defining AOI
-        function defineAOI(id, name) {
-            alert(`Define boundaries for camera: ${name}`);
-        }
-
-        // Load cameras and render on page load
         window.onload = () => {
             renderCameras();
         };

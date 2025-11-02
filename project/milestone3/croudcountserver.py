@@ -10,14 +10,24 @@ from werkzeug.utils import secure_filename
 import threading
 import time
 import queue 
+from datetime import datetime, timedelta, UTC
+import matplotlib
+matplotlib.use('Agg') 
+import matplotlib.pyplot as plt
+import io
+import base64
+import matplotlib.dates as mdates
 
-# NEW Global State for persistent processing
+CROWD_LOG = [] 
+MAX_LOG_SIZE = 500 
+
 FRAME_QUEUES = {} 
 ACTIVE_THREADS = {} 
-
 STREAM_SOURCES = {} 
 THREAD_RESULTS = {}
 LIVE_COUNTS = {} 
+OBJECT_TRACKER = {} 
+NEXT_ID = 1
 
 config = {
     'apiKey': "AIzaSyAHT27Lik4POA67GsBkeVUHWvWYeUqysi4",
@@ -42,7 +52,188 @@ confidence_threshold = 0.4
 iou_threshold = 0.7
 sel = 0
 
+def get_bbox_center(x1, y1, x2, y2):
+    return int((x1 + x2) / 2), int((y1 + y2) / 2)
+
+def is_in_aoi_below_line(center_x, center_y, line_coords):
+    x1, y1, x2, y2 = line_coords
+
+    if x1 == x2:
+        
+        
+        return False
+        
+    m = (y2 - y1) / (x2 - x1)
+    b = y1 - m * x1
+    
+    y_on_line = m * center_x + b
+    
+    
+    return center_y > y_on_line
+
+def continuous_video_analysis(source, area_name):
+    global LIVE_COUNTS, FRAME_QUEUES, ACTIVE_THREADS, STREAM_SOURCES, OBJECT_TRACKER, NEXT_ID
+    
+    cap = cv2.VideoCapture(int(source) if source == "0" else source)
+
+    if not cap.isOpened():
+        print(f"Error: Cannot open source for {area_name}")
+        if area_name in STREAM_SOURCES: del STREAM_SOURCES[area_name]
+        if area_name in LIVE_COUNTS: del LIVE_COUNTS[area_name]
+        if area_name in FRAME_QUEUES: del FRAME_QUEUES[area_name]
+        if area_name in ACTIVE_THREADS: del ACTIVE_THREADS[area_name]
+        if area_name in OBJECT_TRACKER: del OBJECT_TRACKER[area_name]
+        return
+
+    frame_count = 0
+    
+    if area_name not in OBJECT_TRACKER:
+        OBJECT_TRACKER[area_name] = {}
+        
+    tracker = OBJECT_TRACKER[area_name]
+    
+    live_count_in_aoi = 0
+    
+    while area_name in STREAM_SOURCES: 
+        ret, frame = cap.read()
+        if not ret:
+            print(f"Stream ended for {area_name} (End of source).")
+            break 
+            
+        source_info = STREAM_SOURCES.get(area_name, {})
+        line_coords = source_info.get('line_coords', None)
+        
+        results = model.predict(
+            source=frame,
+            classes=[person_class_id], 
+            conf=confidence_threshold,
+            iou=iou_threshold,
+            stream=False, 
+            verbose=False,
+        )
+
+        person_count = 0
+        live_count_in_aoi = 0
+        
+        try:
+            result = next(iter(results))
+        except StopIteration:
+            result = None
+            
+        if result is not None and result.orig_img is not None:
+            processed_frame = result.orig_img
+            person_count = len(result.boxes)
+            
+            new_tracker = {}
+            active_ids = set()
+            
+            for i, box in enumerate(result.boxes):
+                x_1, y_1, x_2, y_2 = map(int, box.xyxy[0].tolist())
+                center_x, center_y = get_bbox_center(x_1, y_1, x_2, y_2)
+                
+                
+                match_id = -1
+                min_dist = float('inf')
+                
+                for obj_id, obj_data in list(tracker.items()):
+                    prev_x, prev_y, is_inside = obj_data 
+                    dist = np.sqrt((center_x - prev_x)**2 + (center_y - prev_y)**2)
+                    if dist < min_dist and dist < 100: 
+                        min_dist = dist
+                        match_id = obj_id
+                
+                
+                if match_id == -1:
+                    match_id = NEXT_ID
+                    NEXT_ID += 1
+                    is_inside = False 
+                else:
+                    prev_x, prev_y, is_inside = tracker[match_id] 
+                
+                
+                
+                
+                if line_coords and is_in_aoi_below_line(center_x, center_y, line_coords):
+                    live_count_in_aoi += 1
+                    is_inside = True
+                    color = (0, 255, 0) 
+                else:
+                    is_inside = False
+                    color = (255, 0, 255) 
+                
+                
+                new_tracker[match_id] = (center_x, center_y, is_inside)
+                active_ids.add(match_id)
+                
+                
+                label = str(match_id)
+                cv2.rectangle(processed_frame, (x_1, y_1), (x_2, y_2), color, 2)
+                cv2.putText(processed_frame, label, (x_1, y_1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
+                
+            
+            tracker.clear()
+            tracker.update(new_tracker)
+            
+            
+            keys_to_delete = [obj_id for obj_id in tracker.keys() if obj_id not in active_ids]
+            for obj_id in keys_to_delete:
+                del tracker[obj_id]
+                
+            
+            
+            if line_coords:
+                x1, y1, x2, y2 = line_coords
+                line_color = (0, 0, 255) 
+                line_thickness = 3
+                cv2.line(processed_frame, (x1, y1), (x2, y2), line_color, line_thickness)
+                
+                LIVE_COUNTS[area_name] = live_count_in_aoi
+                
+                cv2.putText(processed_frame, f'TOTAL IN AOI: {live_count_in_aoi}', (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 3)
+
+            else:
+                
+                LIVE_COUNTS[area_name] = person_count
+                
+            
+            
+            ret, buffer = cv2.imencode('.jpg', processed_frame)
+            frame_bytes = buffer.tobytes()
+            
+            
+            if area_name in FRAME_QUEUES:
+                try:
+                    FRAME_QUEUES[area_name].put_nowait(frame_bytes)
+                except queue.Full:
+                    print(f"Warning: Dropped frame for {area_name} (Queue full).")
+            
+            time.sleep(0.01)
+
+            frame_count += 1
+                
+        else:
+            
+            time.sleep(0.01)
+
+    cap.release()
+    
+    if area_name in STREAM_SOURCES:
+        del STREAM_SOURCES[area_name] 
+    if area_name in LIVE_COUNTS:
+        del LIVE_COUNTS[area_name]
+    if area_name in FRAME_QUEUES:
+        del FRAME_QUEUES[area_name]
+    if area_name in ACTIVE_THREADS:
+        del ACTIVE_THREADS[area_name]
+    if area_name in OBJECT_TRACKER:
+        del OBJECT_TRACKER[area_name]
+        
+    THREAD_RESULTS[area_name] = f"Analysis thread ended. Frames processed: {frame_count}."
+    print(f"Finished processing and stored result for {area_name}")
+
+
 def process_frame_results(results_generator):
+    
     if not results_generator:
         return None, 0
         
@@ -84,71 +275,6 @@ def process_frame_results(results_generator):
 
     return frame, person_count
 
-def continuous_video_analysis(source, area_name):
-    global LIVE_COUNTS, FRAME_QUEUES, ACTIVE_THREADS, STREAM_SOURCES
-    
-    cap = cv2.VideoCapture(int(source) if source == "0" else source)
-
-    if not cap.isOpened():
-        print(f"Error: Cannot open source for {area_name}")
-        if area_name in STREAM_SOURCES: del STREAM_SOURCES[area_name]
-        if area_name in LIVE_COUNTS: del LIVE_COUNTS[area_name]
-        if area_name in FRAME_QUEUES: del FRAME_QUEUES[area_name]
-        if area_name in ACTIVE_THREADS: del ACTIVE_THREADS[area_name]
-        return
-
-    frame_count = 0
-    
-    try:
-        while area_name in STREAM_SOURCES: 
-            ret, frame = cap.read()
-            if not ret:
-                print(f"Stream ended for {area_name} (End of source).")
-                break 
-
-            results = model.predict(
-                source=frame,
-                classes=[person_class_id], 
-                conf=confidence_threshold,
-                iou=iou_threshold,
-                stream=False, 
-                verbose=False,
-            )
-
-            processed_frame, current_count = process_frame_results(results)
-
-            if processed_frame is not None:
-                LIVE_COUNTS[area_name] = current_count 
-                
-                ret, buffer = cv2.imencode('.jpg', processed_frame)
-                frame_bytes = buffer.tobytes()
-                
-                try:
-                    FRAME_QUEUES[area_name].put_nowait(frame_bytes)
-                except queue.Full:
-                    print(f"Warning: Dropped frame for {area_name} (Queue full).")
-
-                frame_count += 1
-                
-    except Exception as e:
-        print(f"Continuous analysis error for {area_name}: {e}")
-        THREAD_RESULTS[area_name] = f"Error: {e}"
-        
-    finally:
-        cap.release()
-        
-        if area_name in STREAM_SOURCES:
-            del STREAM_SOURCES[area_name] 
-        if area_name in LIVE_COUNTS:
-            del LIVE_COUNTS[area_name]
-        if area_name in FRAME_QUEUES:
-            del FRAME_QUEUES[area_name]
-        if area_name in ACTIVE_THREADS:
-            del ACTIVE_THREADS[area_name]
-            
-        THREAD_RESULTS[area_name] = f"Analysis thread ended. Frames processed: {frame_count}."
-        print(f"Finished processing and stored result for {area_name}")
-
 def video_feed_generator(area_name):
     global FRAME_QUEUES
     
@@ -161,7 +287,7 @@ def video_feed_generator(area_name):
         try:
             frame_bytes = q.get(timeout=0.1) 
             
-            yield (b'--frame\r\n'
+            yield (b'--frame_boundary\r\n'
                    b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
             
             q.task_done()
@@ -172,12 +298,13 @@ def video_feed_generator(area_name):
             print(f"Video feed error for {area_name}: {e}")
             break
 
-def start_stream_thread(area_name, source_path):
-    global STREAM_SOURCES, FRAME_QUEUES, ACTIVE_THREADS
+def start_stream_thread(area_name, source_path, threshold, line_coords=None):
+    global STREAM_SOURCES, FRAME_QUEUES, ACTIVE_THREADS, OBJECT_TRACKER
     
-    STREAM_SOURCES[area_name] = source_path
+    STREAM_SOURCES[area_name] = {'source': source_path, 'threshold': threshold, 'line_coords': line_coords}
     LIVE_COUNTS[area_name] = 0
-    FRAME_QUEUES[area_name] = queue.Queue(maxsize=5) 
+    FRAME_QUEUES[area_name] = queue.Queue(maxsize=15) 
+    OBJECT_TRACKER[area_name] = {}
     
     thread = threading.Thread(
         target=continuous_video_analysis, 
@@ -186,6 +313,103 @@ def start_stream_thread(area_name, source_path):
     )
     thread.start()
     ACTIVE_THREADS[area_name] = thread
+
+def generate_crowd_chart_image():
+    global CROWD_LOG
+    
+    data_by_area = {}
+    
+    limited_log = CROWD_LOG[-15:]
+    
+    for entry in limited_log:
+        try:
+            entry_time = datetime.fromisoformat(entry['time'].replace('Z', '+00:00'))
+            area = entry['area']
+            if area not in data_by_area:
+                data_by_area[area] = {'times': [], 'counts': []}
+            
+            data_by_area[area]['times'].append(entry_time)
+            data_by_area[area]['counts'].append(entry['count'])
+        except ValueError:
+            continue
+            
+    if not data_by_area:
+        return ""
+
+    fig, ax = plt.subplots(figsize=(12, 5))
+    
+    for area, data in data_by_area.items():
+        ax.plot(data['times'], data['counts'], label=area, marker='o', markersize=4)
+
+    ax.set_xlabel('Time')
+    ax.set_ylabel('Number of People')
+    ax.grid(True)
+    ax.legend(loc='upper left')
+    
+    ax.xaxis.set_major_formatter(mdates.DateFormatter('%H:%M:%S'))
+    plt.xticks(rotation=45)
+    plt.tight_layout()
+
+    buf = io.BytesIO()
+    plt.savefig(buf, format='png')
+    plt.close(fig) 
+    data = base64.b64encode(buf.getbuffer()).decode("ascii")
+    
+    return data
+
+def generate_density_chart_image():
+    global LIVE_COUNTS, STREAM_SOURCES
+    
+    areas = []
+    densities = []
+    colors = []
+    
+    for area_name, current_count in LIVE_COUNTS.items():
+        stream_info = STREAM_SOURCES.get(area_name)
+        
+        if stream_info and isinstance(current_count, int):
+            threshold = stream_info.get('threshold')
+            if threshold and threshold > 0:
+                density_percentage = (current_count / threshold) * 100
+                
+                if density_percentage < 50:
+                    color = 'green'
+                elif density_percentage < 90:
+                    color = 'gold'
+                else:
+                    color = 'red'
+                
+                areas.append(area_name)
+                densities.append(density_percentage)
+                colors.append(color)
+
+    if not areas:
+        return ""
+
+    fig, ax = plt.subplots(figsize=(12, 5))
+    
+    bars = ax.bar(areas, densities, color=colors)
+
+    ax.set_ylabel('Density Percentage (%)')
+    ax.set_ylim(0, 110) 
+    ax.grid(axis='y', linestyle='--')
+    
+    for bar in bars:
+        height = bar.get_height()
+        ax.text(bar.get_x() + bar.get_width() / 2., 
+                height + 3,
+                f'{height:.1f}%',
+                ha='center', va='bottom', fontsize=10)
+    
+    plt.xticks(rotation=20, ha='right')
+    plt.tight_layout()
+
+    buf = io.BytesIO()
+    plt.savefig(buf, format='png')
+    plt.close(fig) 
+    data = base64.b64encode(buf.getbuffer()).decode("ascii")
+    
+    return data
 
 
 app = Flask(__name__)
@@ -197,13 +421,13 @@ def get_user_data(uid, id_token):
     return db.child("user").child(uid).get(id_token).val()
 
 def generate_server_jwt(uid, email, username):
-    current_time = datetime.datetime.now(datetime.UTC) 
+    current_time = datetime.now(UTC) 
     payload = {
         "uid": uid,
         "email": email,
         "username": username,
         "iat": current_time,
-        "exp": current_time + datetime.timedelta(hours=1)
+        "exp": current_time + timedelta(hours=1)
     }
     token = jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
     return token
@@ -300,11 +524,19 @@ def home():
     if not decoded:
         return redirect(url_for('signin'))
     camera_data = [
-        {'areaName': name, 'sourceType': 'Webcam' if STREAM_SOURCES[name] == '0' else 'Video File'}
+        {'areaName': name, 
+         'sourceType': 'Webcam' if STREAM_SOURCES[name]['source'] == '0' else 'Video File',
+         'capacityThreshold': STREAM_SOURCES[name].get('threshold', 'N/A')}
         for name in STREAM_SOURCES.keys()
     ]
     
-    return render_template('home.html', cameras=camera_data)
+    historical_chart_data = generate_crowd_chart_image() 
+    density_chart_data = generate_density_chart_image() 
+    
+    return render_template('home.html', 
+                           cameras=camera_data,
+                           historical_chart_data=historical_chart_data,
+                           density_chart_data=density_chart_data)
 
 @app.route('/vid_analy')
 def vid_analy():
@@ -313,7 +545,7 @@ def vid_analy():
         return redirect(url_for('signin'))
         
     camera_data = [
-        {'areaName': name, 'sourceType': 'Webcam' if STREAM_SOURCES[name] == '0' else 'Video File'}
+        {'areaName': name, 'sourceType': 'Webcam' if STREAM_SOURCES[name]['source'] == '0' else 'Video File'}
         for name in STREAM_SOURCES.keys()
     ]
 
@@ -327,15 +559,26 @@ def cam_manage_page():
         return redirect(url_for('signin'))
     return render_template("cam_manage.html")
 
+@app.route('/define_aoi/<area_name>')
+def define_aoi_page(area_name):
+    decoded = check_auth(request)
+    if not decoded:
+        return redirect(url_for('signin'))
+    
+    if area_name not in STREAM_SOURCES:
+        return "Error: Stream must be active to define AOI.", 400
+        
+    return render_template('define_aoi.html', area_name=area_name)
+
 @app.route('/video_feed/<area_name>')
 def video_feed(area_name):
-    source = STREAM_SOURCES.get(area_name)
-    if not source:
+    source_info = STREAM_SOURCES.get(area_name)
+    if not source_info:
         return "No active stream for this area. It might have stopped automatically.", 404
 
     return Response(
         video_feed_generator(area_name),
-        mimetype='multipart/x-mixed-replace; boundary=frame'
+        mimetype='multipart/x-mixed-replace; boundary=frame_boundary'
     )
 
 @app.route('/get_total_count', methods=['GET'])
@@ -355,10 +598,13 @@ def get_count(area_name):
     current_count = LIVE_COUNTS.get(area_name, "N/A")
     is_active = area_name in STREAM_SOURCES
     
+    threshold = STREAM_SOURCES.get(area_name, {}).get('threshold', 'N/A')
+
     return jsonify({
         "areaName": area_name,
         "count": current_count,
-        "isActive": is_active
+        "isActive": is_active,
+        "threshold": threshold
     })
 
 
@@ -369,6 +615,7 @@ def upload_video():
 
     video_file = request.files["video"]
     area_name = request.form.get("areaName", "Unknown")
+    capacity_threshold = int(request.form.get("capacityThreshold", 0))
     
     if area_name in STREAM_SOURCES:
         return jsonify({"message": f"A stream is already active for {area_name}. Stop it first."}), 409
@@ -380,26 +627,44 @@ def upload_video():
     if not os.path.exists(full_path):
         return jsonify({"error": f"Failed to save video at: {full_path}"}), 500
 
-    start_stream_thread(area_name, full_path)
+    start_stream_thread(area_name, full_path, capacity_threshold)
     
     return jsonify({"message": f"Video source saved and processing started for {area_name}."}), 200
 
 @app.route('/upload_cam', methods=['POST'])
 def upload_cam():
     area_name = request.form.get("areaName", "Unknown")
+    capacity_threshold = int(request.form.get("capacityThreshold", 0))
     
     if area_name in STREAM_SOURCES:
         return jsonify({"message": f"A stream is already active for {area_name}. Stop it first."}), 409
 
     webcam_source = "0" 
     
-    start_stream_thread(area_name, webcam_source)
+    start_stream_thread(area_name, webcam_source, capacity_threshold)
 
     return jsonify({"message": f"Camera source saved and processing started for {area_name}."}), 200
 
+@app.route('/set_aoi', methods=['POST'])
+def set_aoi():
+    data = request.get_json()
+    area_name = data.get("areaName")
+    line_coords = data.get("line_coords") 
+
+    if not area_name or not line_coords or len(line_coords) != 4:
+        return jsonify({"message": "Invalid data for setting AOI."}), 400
+
+    if area_name not in STREAM_SOURCES:
+        return jsonify({"message": f"Stream for {area_name} not found or inactive. Start stream first."}), 404
+
+    stream_info = STREAM_SOURCES[area_name]
+    stream_info['line_coords'] = line_coords
+
+    return jsonify({"message": f"AOI line coordinates set successfully for {area_name}."}), 200
+
 @app.route('/stop_stream', methods=['POST'])
 def stop_stream():
-    global STREAM_SOURCES, LIVE_COUNTS, FRAME_QUEUES, ACTIVE_THREADS
+    global STREAM_SOURCES, LIVE_COUNTS, FRAME_QUEUES, ACTIVE_THREADS, OBJECT_TRACKER
     area_name = request.json.get("areaName")
     
     if area_name in STREAM_SOURCES:
@@ -407,6 +672,7 @@ def stop_stream():
         
         if area_name in LIVE_COUNTS: del LIVE_COUNTS[area_name]
         if area_name in FRAME_QUEUES: del FRAME_QUEUES[area_name]
+        if area_name in OBJECT_TRACKER: del OBJECT_TRACKER[area_name]
         
         message = f"Stream stop signal sent for {area_name}. Analysis thread will terminate shortly."
     else:
@@ -414,16 +680,16 @@ def stop_stream():
     
     return jsonify({"message": message}), 200
 
-
 @app.route('/signout')
 def signout():
-    global STREAM_SOURCES, LIVE_COUNTS, FRAME_QUEUES, ACTIVE_THREADS
+    global STREAM_SOURCES, LIVE_COUNTS, FRAME_QUEUES, ACTIVE_THREADS, OBJECT_TRACKER
     
     active_streams = list(STREAM_SOURCES.keys())
     for area_name in active_streams:
         if area_name in STREAM_SOURCES: del STREAM_SOURCES[area_name]
         if area_name in LIVE_COUNTS: del LIVE_COUNTS[area_name]
         if area_name in FRAME_QUEUES: del FRAME_QUEUES[area_name]
+        if area_name in OBJECT_TRACKER: del OBJECT_TRACKER[area_name]
         
     cv2.destroyAllWindows()
     
@@ -431,6 +697,64 @@ def signout():
     response = make_response(redirect(url_for('signin')))
     response.set_cookie('server_jwt', '', expires=0)
     return response
+
+@app.route('/log_area_count', methods=['POST'])
+def log_area_count():
+    global CROWD_LOG
+    data = request.get_json()
+    
+    if not data or 'area' not in data or 'count' not in data or 'time' not in data:
+        return jsonify({"message": "Invalid data payload. Missing area, count, or time."}), 400
+        
+    area_name = data['area']
+    count = data['count']
+    timestamp = data['time'] 
+    
+    log_entry = {
+        'area': area_name,
+        'count': int(count),
+        'time': timestamp
+    }
+    
+    CROWD_LOG.append(log_entry)
+    
+    if len(CROWD_LOG) > MAX_LOG_SIZE:
+        CROWD_LOG = CROWD_LOG[-MAX_LOG_SIZE:]
+    
+    return jsonify({
+        "message": "Count and Time logged successfully", 
+        "area": area_name
+    }), 200
+
+@app.route('/get_historical_log', methods=['GET'])
+def get_historical_log():
+    global CROWD_LOG
+    five_minutes_ago = datetime.now(UTC) - timedelta(minutes=5)
+    
+    recent_log = []
+    for entry in CROWD_LOG:
+        try:
+            entry_time = datetime.fromisoformat(entry['time'].replace('Z', '+00:00'))
+            if entry_time > five_minutes_ago:
+                recent_log.append(entry)
+        except ValueError:
+            continue
+
+    return jsonify(recent_log)
+
+@app.route('/get_server_chart_data', methods=['GET'])
+def get_server_chart_data():
+    historical_data = generate_crowd_chart_image() 
+    density_data = generate_density_chart_image()
+    
+    if not historical_data and not density_data:
+        return jsonify({"message": "No chart data available."}), 204
+        
+    return jsonify({
+        "historical_chart_data": historical_data,
+        "density_chart_data": density_data
+    })
+
 
 if __name__ == '__main__':
     app.run(debug=True, threaded=True)
