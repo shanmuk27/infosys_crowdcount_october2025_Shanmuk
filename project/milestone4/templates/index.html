@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="icon" href="{{ url_for('static', filename='images/logo.png') }}">
+    <title>Crowd Count</title>
+    <style>
+        body { margin: 0; font-family: "Lato", sans-serif; }
+        .sidebar {
+            margin: 0; padding: 0; width: 220px; background-color: #f1f1f1;
+            position: fixed; height: 100%; overflow: auto; transition: width 0.3s;
+        }
+        .sidebar a {
+            display: flex; align-items: center; gap: 8px; color: black;
+            padding: 16px; text-decoration: none; transition: background 0.3s, color 0.3s, padding-left 0.2s;
+        }
+        .sidebar a.active {
+            background-color: #04AA6D; color: white; border-left: 5px solid #027a4f;
+        }
+        .sidebar a:hover:not(.active) {
+            background-color: #555; color: white; padding-left: 24px;
+        }
+        .sidebar a svg { flex-shrink: 0; fill: currentColor; }
+        div.content {
+            margin-left: 220px; padding: 1px 16px; height: 100vh;
+            min-width: calc(100vw - 220px); box-sizing: border-box;
+        }
+        @media screen and (max-width: 700px) {
+            .sidebar { width: 60px; }
+            .sidebar a span { display: none; }
+            div.content { margin-left: 60px; min-width: calc(100vw - 60px); }
+        }
+        @media screen and (max-width: 400px) {
+            .sidebar { width: 100%; height: auto; position: relative; }
+            .sidebar a { justify-content: center; }
+            div.content { margin-left: 0; min-width: 100vw; }
+        }
+        #I_frame { width: 100%; height: 100%; border: 0; }
+        .header { display: flex; justify-content: space-between; align-items: center; padding: 0 10px; }
+    </style>
+</head>
+<body>
+    <div class="sidebar">
+        <a class="active" href="/home" aria-current="page" title="Home">
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-house-door-fill" viewBox="0 0 16 16"><path d="M6.5 14.5v-3.505c0-.245.25-.495.5-.495h2c.25 0 .5.25.5.5v3.5a.5.5 0 0 0 .5.5h4a.5.5 0 0 0 .5-.5v-7a.5.5 0 0 0-.146-.354L13 5.793V2.5a.5.5 0 0 0-.5-.5h-1a.5.5 0 0 0-.5.5v1.293L8.354 1.146a.5.5 0 0 0-.708 0l-6 6A.5.5 0 0 0 1.5 7.5v7a.5.5 0 0 0 .5.5h4a.5.5 0 0 0 .5-.5"/></svg>
+            <span>Home</span>
+        </a>
+        <a href="/vid_analy" title="Video Analysis">
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-camera-video-fill" viewBox="0 0 16 16"><path d="M0 5a2 2 0 0 1 2-2h7.5a2 2 0 0 1 1.983 1.738l3.11-1.382A1 1 0 0 1 16 4.269v7.462a1 1 0 0 1-1.406.913l-3.111-1.382A2 2 0 0 1 9.5 13H2a2 2 0 0 1-2-2z"/></svg>
+            <span>Video analysis</span>
+        </a>
+        <a href="/cam_manage" title="Camera Management">
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-camera-video-off-fill" viewBox="0 0 16 16"><path fill-rule="evenodd" d="M10.961 12.365a2 2 0 0 0 .522-1.103l3.11 1.382A1 1 0 0 0 16 11.731V4.269a1 1 0 0 0-1.406-.913l-3.111 1.382A2 2 0 0 0 9.5 3H4.272zm-10.114-9A2 2 0 0 0 0 5v6a2 2 0 0 0 2 2h5.728zm9.746 11.925-10-14 .814-.58 10 14z"/></svg>
+            <span>Camera management</span>
+        </a>
+        <a href="/history_download" title="History Download">
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-file-earmark-arrow-down-fill" viewBox="0 0 16 16"><path d="M9.293 0H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V7.707L9.293 0zM9.5 3.5v-2l3 3h-2.5a1 1 0 0 1-1-1zm-1 4a.5.5 0 0 1 .5.5v3.793l1.146-1.147a.5.5 0 0 1 .708.708l-2 2a.5.5 0 0 1-.708 0l-2-2a.5.5 0 0 1 .708-.708L7.5 11.793V8.5a.5.5 0 0 1 .5-.5z"/></svg>
+            <span>History Download</span>
+        </a>
+        <a href="/profile" title="Profile">
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-person-circle" viewBox="0 0 16 16"><path d="M11 6a3 3 0 1 1-6 0 3 3 0 0 1 6 0"/><path fill-rule="evenodd" d="M0 8a8 8 0 1 1 16 0A8 8 0 0 1 0 8m8-7a7 7 0 0 0-5.468 11.37C3.242 11.226 4.805 10 8 10s4.757 1.225 5.468 2.37A7 7 0 0 0 8 1"/></svg>
+            <span>Profile</span>
+        </a>
+        <a href="/signout" title="Signout">
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-box-arrow-right" viewBox="0 0 16 16"><path fill-rule="evenodd" d="M10 12.5a.5.5 0 0 1-.5.5h-8a.5.5 0 0 1-.5-.5v-9a.5.5 0 0 1 .5-.5h8a.5.5 0 0 1 .5.5v2a.5.5 0 0 0 1 0v-2A1.5 1.5 0 0 0 9.5 2h-8A1.5 1.5 0 0 0 0 3.5v9A1.5 1.5 0 0 0 1.5 14h8a1.5 1.5 0 0 0 1.5-1.5v-2a.5.5 0 0 0-1 0z"/><path fill-rule="evenodd" d="M15.854 8.354a.5.5 0 0 0 0-.708l-3-3a.5.5 0 0 0-.708.708L14.293 7.5H5.5a.5.5 0 0 0 0 1h8.793l-2.147 2.146a.5.5 0 0 0 .708.708z"/></svg>
+            <span>Signout</span>
+        </a>
+    </div>
+
+    <div class="content">
+        <div class="header">
+            <h2>Crowd Count</h2>
+            <h2 id="user_name">USER: {{username}}</h2>
+        </div>
+        <iframe id="I_frame" src="{{ url_for('home') }}"></iframe>
+    </div>
+
+    <script>
+        const iframe = document.getElementById("I_frame");
+        document.querySelectorAll(".sidebar a").forEach(link => {
+            link.addEventListener("click", function (e) {
+                e.preventDefault();
+
+                const linkUrl = this.getAttribute("href");
+
+                if (linkUrl === '/signout') {
+                    window.location.href = linkUrl;
+                    return;
+                }
+
+                const currentActive = document.querySelector(".sidebar a.active");
+                if (currentActive) {
+                    currentActive.classList.remove("active");
+                    currentActive.removeAttribute("aria-current");
+                }
+
+                this.classList.add("active");
+                this.setAttribute("aria-current", "page");
+
+                iframe.src = linkUrl;
+            });
+        });
+    </script>
+</body>
+</html>

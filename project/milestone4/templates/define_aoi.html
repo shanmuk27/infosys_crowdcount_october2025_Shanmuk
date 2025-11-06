@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Define Line for {{ area_name }}</title>
+    <style>
+        body { margin: 0; background-color: #f4f4f9; display: flex; justify-content: center; align-items: center; min-height: 100vh; font-family: Arial, sans-serif; }
+        .container { 
+            position: relative; 
+            max-width: 90%; 
+            box-shadow: 0 8px 16px rgba(0, 0, 0, 0.3);
+            border-radius: 12px;
+            overflow: hidden;
+        }
+        .video-feed {
+            display: block;
+            width: 100%;
+            height: auto;
+        }
+        #drawingCanvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            cursor: crosshair;
+        }
+        .controls {
+            padding: 15px;
+            background-color: #fff;
+            text-align: center;
+        }
+        .info-box {
+            background-color: #e6f7ff;
+            border: 1px solid #91d5ff;
+            padding: 10px;
+            margin-bottom: 10px;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+        .coords {
+            font-weight: bold;
+            color: #0056b3;
+            display: block;
+            margin-top: 5px;
+        }
+        .btn-base { padding: 10px 20px; border-radius: 6px; font-weight: 600; cursor: pointer; border: none; margin: 0 5px; }
+        .btn-save { background-color: #059669; color: white; }
+        .btn-reset { background-color: #ffc107; color: #333; }
+        .btn-cancel { background-color: #6c757d; color: white; }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <img id="videoFeed" class="video-feed" 
+             src="{{ url_for('video_feed', area_name=area_name) }}"
+             alt="Live Analysis Stream">
+        <canvas id="drawingCanvas"></canvas>
+
+        <div class="controls">
+            <div class="info-box">
+                <p>Click **two points** on the video to define the start and end of your counting line.</p>
+                <span class="coords">Start (X1, Y1): <span id="startCoords">--</span></span>
+                <span class="coords">End (X2, Y2): <span id="endCoords">--</span></span>
+            </div>
+            <button id="resetButton" class="btn-base btn-reset" onclick="resetCanvas()">Reset</button>
+            <button id="saveButton" class="btn-base btn-save" onclick="saveLine()" disabled>Save Line (X1, Y1, X2, Y2)</button>
+            <button id="cancelButton" class="btn-base btn-cancel" onclick="window.history.back()">Cancel</button>
+        </div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('drawingCanvas');
+        const ctx = canvas.getContext('2d');
+        const video = document.getElementById('videoFeed');
+        const startCoordsDisplay = document.getElementById('startCoords');
+        const endCoordsDisplay = document.getElementById('endCoords');
+        const saveButton = document.getElementById('saveButton');
+        const areaName = "{{ area_name }}";
+
+        let points = [];
+        let drawingMode = true;
+
+        function setupCanvas() {
+            const rect = video.getBoundingClientRect();
+            canvas.width = video.naturalWidth || video.offsetWidth; 
+            canvas.height = video.naturalHeight || video.offsetHeight;
+            canvas.style.width = `${rect.width}px`;
+            canvas.style.height = `${rect.height}px`;
+        }
+
+        video.onload = setupCanvas;
+        video.onloadeddata = setupCanvas;
+        window.onresize = setupCanvas;
+
+        function getScaledCoords(event) {
+            const rect = canvas.getBoundingClientRect();
+            const scaleX = canvas.width / rect.width;
+            const scaleY = canvas.height / rect.height;
+            const rawX = event.clientX - rect.left;
+            const rawY = event.clientY - rect.top;
+            
+            const x = Math.round(rawX * scaleX);
+            const y = Math.round(rawY * scaleY);
+            
+            return { x, y };
+        }
+
+        function drawLine() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            if (points.length === 2) {
+                ctx.beginPath();
+                ctx.moveTo(points[0].x, points[0].y);
+                ctx.lineTo(points[1].x, points[1].y);
+                ctx.strokeStyle = 'red';
+                ctx.lineWidth = 4;
+                ctx.stroke();
+
+                ctx.fillStyle = 'blue';
+                ctx.beginPath();
+                ctx.arc(points[0].x, points[0].y, 8, 0, 2 * Math.PI);
+                ctx.fill();
+                ctx.beginPath();
+                ctx.arc(points[1].x, points[1].y, 8, 0, 2 * Math.PI);
+                ctx.fill();
+
+                startCoordsDisplay.textContent = `(${points[0].x}, ${points[0].y})`;
+                endCoordsDisplay.textContent = `(${points[1].x}, ${points[1].y})`;
+                saveButton.disabled = false;
+            } else if (points.length === 1) {
+                ctx.beginPath();
+                ctx.fillStyle = 'blue';
+                ctx.arc(points[0].x, points[0].y, 8, 0, 2 * Math.PI);
+                ctx.fill();
+                startCoordsDisplay.textContent = `(${points[0].x}, ${points[0].y})`;
+                endCoordsDisplay.textContent = '--';
+                saveButton.disabled = true;
+            }
+        }
+
+        canvas.addEventListener('click', (e) => {
+            if (!drawingMode) return;
+
+            if (points.length < 2) {
+                const { x, y } = getScaledCoords(e);
+                points.push({ x, y });
+                drawLine();
+
+                if (points.length === 2) {
+                    drawingMode = false;
+                }
+            }
+        });
+
+        function resetCanvas() {
+            points = [];
+            drawingMode = true;
+            drawLine();
+            startCoordsDisplay.textContent = '--';
+            endCoordsDisplay.textContent = '--';
+            saveButton.disabled = true;
+        }
+
+        async function saveLine() {
+            if (points.length !== 2) {
+                alert("Please define exactly two points.");
+                return;
+            }
+
+            const x1 = points[0].x;
+            const y1 = points[0].y;
+            const x2 = points[1].x;
+            const y2 = points[1].y;
+
+            const line_coords = [x1, y1, x2, y2]; 
+
+            try {
+                const response = await fetch('/set_aoi', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        areaName: areaName,
+                        line_coords: line_coords 
+                    })
+                });
+
+                const result = await response.json();
+
+                if (response.ok) {
+                    alert(`Line boundaries set for: ${areaName}. Counting mode enabled.`);
+                    window.location.href = '/cam_manage';
+                } else {
+                    alert(`Failed to set boundaries: ${result.message || "Server Error"}`);
+                }
+            } catch (error) {
+                console.error("Error setting AOI:", error);
+                alert("An error occurred while contacting the server.");
+            }
+        }
+    </script>
+</body>
+</html>

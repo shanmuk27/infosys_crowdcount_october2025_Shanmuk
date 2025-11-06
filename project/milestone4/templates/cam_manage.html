@@ -1,0 +1,425 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Easy Crowd Monitor Setup</title>
+    
+    <style>
+        *, *::before, *::after { box-sizing: border-box; }
+        html, body { margin: 0; padding: 0; height: 100%; font-family: 'Inter', sans-serif; }
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap');
+        body { background-color: #f3f4f6; min-height: 100vh; }
+        .main-container { padding: 1.5rem; }
+        @media (min-width: 768px) { .main-container { padding: 2.5rem; } }
+
+        .header { margin-bottom: 2rem; display: flex; justify-content: space-between; align-items: center; }
+        .main-title { font-size: 1.875rem; font-weight: 700; color: #1f2937; }
+        .title-highlight { color: #059669; }
+
+        .camera-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 1.5rem; }
+        .placeholder-box { padding: 2rem; text-align: center; background-color: white; border-radius: 0.75rem; border: 2px dashed #ccc; }
+
+        #addButton {
+            position: fixed; top: 20px; right: 20px;
+            width: 45px; height: 45px;
+            border-radius: 50%; border: none;
+            background-color: #059669; color: white;
+            font-size: 1.8rem; font-weight: 300;
+            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.4);
+            cursor: pointer; z-index: 1000;
+            transition: background-color 0.2s, transform 0.2s;
+        }
+        #addButton:hover {
+            background-color: #047857;
+            transform: scale(1.1);
+        }
+
+        .modal-overlay {
+            position: fixed; top: 0; right: 0; bottom: 0; left: 0;
+            background-color: rgba(17, 24, 39, 0.75);
+            padding: 1rem; z-index: 100;
+            display: none; align-items: center; justify-content: center;
+        }
+        .modal-overlay.show { display: flex; }
+        .modal-content {
+            background-color: white; border-radius: 0.75rem;
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+            width: 100%; max-width: 25rem; padding: 1.5rem;
+        }
+        
+        .form-group { margin-bottom: 1rem; }
+        .form-label { display: block; font-size: 0.875rem; font-weight: 600; color: #374151; margin-bottom: 0.5rem; }
+        .form-input { 
+            width: 100%; padding: 0.75rem; border: 1px solid #d1d5db; border-radius: 0.5rem;
+            box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+        }
+        .btn-base { padding: 0.5rem 1rem; border-radius: 0.5rem; font-weight: 600; cursor: pointer; border: none; }
+        .btn-cancel { background-color: #e5e7eb; color: #1f2937; }
+        .btn-save { background-color: #059669; color: white; }
+
+        .cam-card { 
+            background-color: white; border-radius: 0.75rem; padding: 1.5rem; 
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1); border: 1px solid #e5e7eb;
+        }
+        .btn-primary { background-color: #3b82f6; color: white; padding: 0.5rem 0.75rem; font-size: 0.85rem; }
+        .btn-delete { background-color: #ef4444; color: white; padding: 0.5rem 0.75rem; font-size: 0.85rem; }
+        .btn-secondary-dark { background-color: #5a6268; color: white; padding: 0.5rem 0.75rem; font-size: 0.85rem; }
+        .btn-data-delete { background-color: #dc3545; color: white; padding: 0.5rem 0.75rem; font-size: 0.85rem; }
+        
+    </style>
+</head>
+<body>
+
+    <div class="main-container">
+        <header class="header">
+            <h1 class="main-title">
+                Live Crowd Monitoring <span class="title-highlight">Setup</span>
+            </h1>
+        </header>
+
+        <div id="cameraList" class="camera-list">
+            <div id="emptyState" class="placeholder-box">
+                <p style="color: #6b7280; font-weight: 600;">
+                    No cameras added yet. Click the <b>+</b> button at the top right to start monitoring!
+                </p>
+            </div>
+        </div>
+    </div>
+
+    <button id="addButton" onclick="toggleAddModal()">+</button>
+
+    <div id="addCamModal" class="modal-overlay">
+        <div class="modal-content">
+            <h2 style="font-size: 1.5rem; font-weight: 600; margin-bottom: 1rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem;">
+                Add New Camera
+            </h2>
+            <form id="addCamForm">
+                
+                <div class="form-group">
+                    <label for="areaName" class="form-label">1. Area Name (e.g., Entrance)</label>
+                    <input type="text" id="areaName" required list="existingAreaNames"
+                               class="form-input"
+                               placeholder="Enter area name or select from existing">
+                    <datalist id="existingAreaNames"></datalist>
+                </div>
+
+                <div class="form-group">
+                    <label for="capacityThreshold" class="form-label">2. Capacity Threshold (Alert Above This Count)</label>
+                    <input type="number" id="capacityThreshold" required
+                               class="form-input"
+                               placeholder="Enter max capacity threshold" min="1">
+                </div>
+                <div class="form-group">
+                    <label for="sourceType" class="form-label">3. Input Source Type</label>
+                    <select id="sourceType" class="form-input" onchange="updateSourceFields()" required>
+                        <option value="file">Video File Upload</option>
+                        <option value="webcam">Live Webcam Stream</option>
+                    </select>
+                </div>
+
+                <div id="fileInputContainer" class="form-group">
+                    <label for="streamFile" class="form-label">Video File</label>
+                    <input type="file" id="streamFile" name="streamFile" accept="video/*" class="form-input" required>
+                </div>
+                
+                <div id="webcamInputContainer" style="display: none;" class="form-group">
+                    <label class="form-label">Webcam Details</label>
+                    <p class="form-input" style="background-color: #eef2ff; color: #3b82f6; font-weight: 500;">
+                        Live Webcam Selected (Simulated Device).
+                    </p>
+                </div>
+
+                <div style="display: flex; justify-content: flex-end; gap: 0.75rem; margin-top: 1.5rem;">
+                    <button type="button" onclick="toggleAddModal()" class="btn-base btn-cancel">
+                        Cancel
+                    </button>
+                    <button type="button" onclick="handleFormSubmit(event)" class="btn-base btn-save">
+                        Save Camera
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script>
+        // Use a single global array for the current user's camera configurations
+        let cameraList = []; 
+
+        const addCamModal = document.getElementById('addCamModal');
+        const sourceTypeSelect = document.getElementById('sourceType');
+        const fileInputContainer = document.getElementById('fileInputContainer');
+        const webcamInputContainer = document.getElementById('webcamInputContainer');
+        const cameraListEl = document.getElementById('cameraList');
+        const emptyStateEl = document.getElementById('emptyState');
+        const areaNameInput = document.getElementById('areaName');
+        const streamFileInput = document.getElementById('streamFile');
+        const capacityThresholdInput = document.getElementById('capacityThreshold'); 
+
+        // --- Data Persistence Functions (Relying only on Flask API) ---
+
+        // Saves cameraList to Flask/Firebase for the current user
+        async function saveCameraList() {
+            try {
+                const response = await fetch('/api/camera_config', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(cameraList)
+                });
+                if (!response.ok) {
+                    const result = await response.json();
+                    throw new Error(result.message || 'Failed to save camera list on server.');
+                }
+            } catch (error) {
+                console.error("Error saving configs to server:", error);
+                alert("Error saving camera configuration. Please check the console.");
+            }
+        }
+        
+        // Load camera list from Flask/Firebase for the current user
+        async function loadCameraList() {
+            try {
+                const response = await fetch('/api/camera_config', { method: 'GET' });
+                const data = await response.json();
+                
+                if (response.ok && data.configs) {
+                    cameraList = data.configs;
+                } else {
+                    // Fallback in case of server error or no data
+                    cameraList = []; 
+                }
+            } catch (error) {
+                console.error("Error loading configs from server:", error);
+                cameraList = []; // Default to empty on error
+                alert("Error loading camera configuration. Defaulting to empty list.");
+            }
+            
+            renderCameras();
+        }
+
+        // --- UI Functions ---
+
+        function toggleAddModal() {
+            addCamModal.classList.toggle('show');
+            if (addCamModal.classList.contains('show')) {
+                document.getElementById('addCamForm').reset();
+                updateSourceFields(); 
+            }
+        }
+
+        function updateSourceFields() {
+            const selectedSource = sourceTypeSelect.value;
+            if (selectedSource === 'file') {
+                fileInputContainer.style.display = 'block';
+                webcamInputContainer.style.display = 'none';
+                streamFileInput.required = true;
+            } else {
+                fileInputContainer.style.display = 'none';
+                webcamInputContainer.style.display = 'block';
+                streamFileInput.required = false;
+                streamFileInput.value = '';
+            }
+        }
+
+        function renderCameras() {
+            cameraListEl.innerHTML = '';
+            if (cameraList.length === 0) {
+                cameraListEl.appendChild(emptyStateEl); 
+                emptyStateEl.style.display = 'block';
+                return;
+            }
+            emptyStateEl.style.display = 'none';
+
+            cameraList.forEach(cam => {
+                // Ensure unique ID exists for local operations (if not provided by API)
+                const camId = cam.id || 'temp-' + cam.areaName; 
+                const cardHTML = `
+                    <div class="cam-card">
+                        <h3 style="font-size: 1.25rem; font-weight: 600; color: #1f2937; margin-bottom: 0.5rem;">
+                            ${cam.areaName}
+                        </h3>
+                        <p style="font-size: 0.875rem; color: #6b7280; margin-bottom: 0.5rem;">
+                            Source: <span style="font-weight: 500;">${cam.sourceType === 'file' ? 'Video File' : 'Webcam'}</span>
+                        </p>
+                        <p style="font-size: 0.875rem; color: #6b7280; margin-bottom: 1rem;">
+                            Threshold: <span style="font-weight: 500; color: #cc6600;">${cam.capacityThreshold} people</span>
+                        </p>
+                        <div style="background-color: #eef2ff; padding: 0.75rem; border-radius: 0.5rem; display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+                            <span style="font-size: 0.875rem; font-weight: 500; color: #4338ca;">Mock Count:</span>
+                            <span style="font-size: 1.5rem; font-weight: 800; color: #4f46e5;">${Math.floor(Math.random() * 150) + 10}</span>
+                        </div>
+                        <div style="display: flex; justify-content: space-between; gap: 0.5rem; margin-bottom: 1rem;">
+                            <button onclick="defineAOI('${camId}', '${cam.areaName}')" class="btn-base btn-primary" style="flex-grow: 1;">
+                                Define Boundaries
+                            </button>
+                            <button onclick="deleteCamera('${camId}', '${cam.areaName}')" class="btn-base btn-delete">
+                                Remove Stream
+                            </button>
+                        </div>
+                        <div style="display: flex; justify-content: space-between; gap: 0.5rem;">
+                            <a href="/download_history/${cam.areaName}" class="btn-base btn-secondary-dark" style="flex-grow: 1; text-align: center;">
+                                Download CSV
+                            </a>
+                            <button onclick="deleteHistory('${cam.areaName}')" class="btn-base btn-data-delete">
+                                Delete History
+                            </button>
+                        </div>
+                    </div>
+                `;
+                cameraListEl.insertAdjacentHTML('beforeend', cardHTML);
+            });
+        }
+
+        // --- Event Handlers ---
+
+        async function handleFormSubmit(event) {
+            event.preventDefault();
+
+            const areaName = areaNameInput.value.trim();
+            const capacityThreshold = capacityThresholdInput.value.trim(); 
+            const sourceType = sourceTypeSelect.value;
+            let sourceDetail = null;
+
+            if (cameraList.some(cam => cam.areaName === areaName)) {
+                alert(`Error: A camera named "${areaName}" already exists. Please choose a unique name.`);
+                return;
+            }
+            if (!capacityThreshold || parseInt(capacityThreshold) <= 0) {
+                alert("Please enter a valid capacity threshold (must be 1 or greater).");
+                return;
+            }
+
+            const formData = new FormData(); 
+            formData.append("areaName", areaName); 
+            formData.append("capacityThreshold", capacityThreshold); 
+
+            let endpoint = "";
+
+            if (sourceType === "file") {
+                const file = streamFileInput.files[0];
+                if (!file) {
+                    alert("Please select a video file before saving.");
+                    return;
+                }
+                sourceDetail = file.name;
+                formData.append("video", file); 
+                endpoint = "/upload_video";
+            } else {
+                sourceDetail = "Live Webcam Feed (Device ID: 0)";
+                endpoint = "/upload_cam";
+            }
+
+            // 1. Send the stream start command to the server
+            try {
+                const response = await fetch(endpoint, { method: "POST", body: formData });
+                const result = await response.json();
+                
+                if (!response.ok) {
+                    alert(`Stream start failed: ${result.message || "Server Error"}`);
+                    console.error("Stream start failed.", result);
+                    return; 
+                }
+            } catch (error) {
+                console.error("Error during upload/config:", error);
+                alert("An error occurred while contacting the server to start the stream.");
+                return;
+            }
+
+
+            // 2. Add the configuration to the local list and save to Firebase
+            const newCamera = {
+                id: 'cam-' + Date.now(),
+                areaName: areaName,
+                capacityThreshold: parseInt(capacityThreshold), 
+                sourceType: sourceType,
+                sourceDetail: sourceDetail
+            };
+
+            cameraList.push(newCamera);
+            await saveCameraList(); // SAVES TO FIREBASE
+            
+            // 3. Update UI
+            toggleAddModal();
+            renderCameras();
+            alert(`Camera for "${areaName}" added and processing started.`);
+        }
+
+        function defineAOI(id, name) {
+            const cam = cameraList.find(c => c.id === id);
+            if (cam) {
+                // Redirect to the /define_aoi/<area_name> route
+                window.location.href = `/define_aoi/${name}`;
+            } else {
+                alert("Camera not found.");
+            }
+        }
+
+
+        async function deleteCamera(id, name) {
+            if (confirm(`Are you sure you want to remove and stop the stream for "${name}"? This will also delete the associated camera configuration from your account.`)) {
+                
+                // 1. Send stop signal to server
+                try {
+                    const response = await fetch('/stop_stream', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({ areaName: name })
+                    });
+                    
+                    if (!response.ok) {
+                        console.error(`Failed to send stop signal to server for ${name}.`);
+                    } else {
+                        console.log(`Stop signal sent successfully for ${name}.`);
+                    }
+                } catch (error) {
+                    console.error("Error stopping stream:", error);
+                }
+
+                // 2. Delete history (automatically attempted by deleteCamera as per original logic)
+                // This call is optional, but kept for consistency with your existing code's behavior.
+                try {
+                    const deleteResponse = await fetch(`/delete_history/${name}`, { method: 'POST' });
+                    if (!deleteResponse.ok && deleteResponse.status !== 404) {
+                         console.error(`Failed to automatically delete history for ${name}. Server Status: ${deleteResponse.status}`);
+                    }
+                } catch (error) {
+                     console.error("Failed to connect to delete history endpoint.", error);
+                }
+
+                // 3. Remove from local array and save the updated list to Firebase
+                cameraList = cameraList.filter(c => c.id !== id);
+                await saveCameraList(); // SAVES UPDATED LIST TO FIREBASE
+                
+                // 4. Update UI
+                renderCameras();
+                alert(`Camera "${name}" has been removed, the stream has been stopped, and the configuration saved.`);
+            }
+        }
+        
+        async function deleteHistory(areaName) {
+            if (confirm(`Are you sure you want to delete ALL historical data for "${areaName}"? This action cannot be undone.`)) {
+                try {
+                    const response = await fetch(`/delete_history/${areaName}`, {
+                        method: 'POST' 
+                    });
+                    
+                    const result = await response.json();
+                    
+                    if (response.ok) {
+                        alert(result.message);
+                    } else {
+                        alert(`Failed to delete history: ${result.message || 'Server error.'}`);
+                    }
+                } catch (error) {
+                    console.error("Error deleting history:", error);
+                    alert("An error occurred while trying to delete history.");
+                }
+            }
+        }
+
+        window.onload = () => {
+            loadCameraList(); // LOADS ONLY THE CURRENT USER'S CONFIGS FROM FIREBASE
+        };
+    </script>
+</body>
+</html>

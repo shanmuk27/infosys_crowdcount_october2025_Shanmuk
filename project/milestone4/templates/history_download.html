@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>📊 {{ displayed_username }} - History Download</title>
+    <style>
+        body { font-family: Arial, sans-serif; background-color: #f4f4f9; padding: 20px; }
+        .card { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 4px 8px rgba(0,0,0,0.1); margin-bottom: 20px; max-width: 800px; margin-left: auto; margin-right: auto; }
+        .header-title { text-align: center; margin-bottom: 30px; }
+        .area-item { display: flex; justify-content: space-between; align-items: center; padding: 15px 0; border-bottom: 1px solid #eee; }
+        .area-item:last-child { border-bottom: none; }
+        .area-name { font-weight: bold; font-size: 1.1em; }
+        .download-button { 
+            padding: 8px 15px; 
+            background-color: #4a90e2; 
+            color: white; 
+            border: none; 
+            border-radius: 5px; 
+            text-decoration: none; 
+            font-size: 0.9em;
+            cursor: pointer;
+            transition: background-color 0.2s;
+            /* Make button display inline-block for proper alignment */
+            display: inline-block;
+        }
+        .download-button:hover {
+            background-color: #3a7bd5;
+        }
+        
+        /* --- ALIGNMENT FIX APPLIED HERE --- */
+        .all-history-container {
+            /* Use Flexbox for centering */
+            display: flex; 
+            flex-direction: column; /* Stack children vertically */
+            align-items: center; /* Center items horizontally */
+            
+            padding: 15px 0;
+            margin-top: 15px;
+            border-top: 2px solid #ddd;
+            text-align: center; /* Fallback for older browsers */
+        }
+        /* ---------------------------------- */
+        
+        .download-all-button {
+            background-color: #059669; /* Green for total download */
+        }
+        .download-all-button:hover {
+            background-color: #047857;
+        }
+        .back-link {
+            text-decoration: none;
+            color: #663399; /* Purple color */
+            font-weight: bold;
+            font-size: 1.1em;
+            display: block;
+            margin-top: 20px;
+        }
+        .back-link:hover {
+            text-decoration: underline;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="card">
+        <h1 class="header-title">📊 Historical Data Download ({{ displayed_username }})</h1>
+        
+        {% if logged_areas %}
+            <p>Select the area whose processed stream data you wish to download (CSV format).</p>
+            <hr>
+            {% for area in logged_areas %}
+            <div class="area-item">
+                <span class="area-name">{{ area }}</span>
+                <a href="{{ url_for('download_history', area_name=area) }}" class="download-button">
+                    Download {{ area }} History
+                </a>
+            </div>
+            {% endfor %}
+
+            <div class="all-history-container">
+                <a href="{{ url_for('download_history') }}" class="download-button download-all-button">
+                    Download ALL History
+                </a>
+                <p style="font-size: 0.8em; color: #888; margin-top: 5px;">
+                    Downloads all logs from all areas into one CSV file.
+                </p>
+            </div>
+
+        {% else %}
+            <p style="text-align: center; color: #888; font-weight: bold; margin: 30px 0;">
+                No historical data has been logged yet for {{ displayed_username }}.<br>
+                Please ensure a camera stream is running and the system is logging counts.
+            </p>
+        {% endif %}
+        
+        <p style="text-align: center; margin-top: 20px;">
+            <a href="{{ url_for('home') }}" class="back-link">← Back to Dashboard</a>
+        </p>
+    </div>
+
+</body>
+</html>
