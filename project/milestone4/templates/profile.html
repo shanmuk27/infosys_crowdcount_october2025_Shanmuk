@@ -3,9 +3,11 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Crowd count</title>
+    <title>Profile - Crowd Count</title>
     <style>
-        /* General Body Styling */
+        /* ==============================
+           General Body Styling
+        ============================== */
         body {
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
             background-color: #f0f2f5;
@@ -16,32 +18,35 @@
             margin: 0;
         }
 
-        /* The main profile card container */
+        /* ==============================
+           Main Profile Container
+        ============================== */
         .profile-container {
             background-color: #ffffff;
             width: 100%;
             max-width: 500px;
             border-radius: 12px;
             box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
-            overflow: hidden; /* Ensures child elements respect the border radius */
-            text-align: center;
+            overflow: hidden;
             margin: 20px;
         }
 
-        /* Header section with the avatar and name */
+        /* ==============================
+           Header Section
+        ============================== */
         .profile-header {
             padding: 40px 20px 20px;
             border-bottom: 1px solid #e0e0e0;
+            text-align: center;
         }
 
-        /* Styling for the circular profile picture */
         .profile-avatar {
             width: 120px;
             height: 120px;
-            border-radius: 50%; /* Makes the image a circle */
+            border-radius: 50%;
             border: 4px solid #ffffff;
             box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
-            object-fit: cover; /* Prevents the image from being stretched */
+            object-fit: cover;
             margin-bottom: 15px;
         }
 
@@ -58,7 +63,9 @@
             color: #777;
         }
 
-        /* Main body section for user details */
+        /* ==============================
+           Profile Body Section
+        ============================== */
         .profile-body {
             padding: 25px 30px;
         }
@@ -72,9 +79,10 @@
 
         .profile-details-list li {
             display: flex;
-            justify-content: space-between; /* Pushes label and value to opposite ends */
+            justify-content: space-between;
             padding: 12px 0;
             border-bottom: 1px solid #f0f0f0;
+            align-items: center;
         }
 
         .profile-details-list li:last-child {
@@ -89,18 +97,52 @@
         .profile-details-list span {
             color: #333;
         }
-        
-        /* Footer section for action buttons */
+
+        /* ==============================
+           Guest Message
+        ============================== */
+        .guest-message {
+            text-align: center;
+            padding: 15px 0;
+            color: #dc3545;
+            font-weight: bold;
+        }
+
+        /* ==============================
+           Alert Messages
+        ============================== */
+        .alert {
+            padding: 10px;
+            margin-bottom: 15px;
+            border-radius: 5px;
+            text-align: center;
+        }
+
+        .alert.success {
+            background-color: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+
+        .alert.error {
+            background-color: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+
+        /* ==============================
+           Footer Section (Buttons)
+        ============================== */
         .profile-footer {
             background-color: #fafafa;
             padding: 20px 30px;
             display: flex;
-            gap: 15px; /* Adds space between buttons */
+            gap: 15px;
             justify-content: center;
         }
-        
+
         .profile-button {
-            background-color: #007bff;
+            background-color: #04AA6D;
             color: white;
             border: none;
             padding: 10px 20px;
@@ -110,57 +152,68 @@
             cursor: pointer;
             text-decoration: none;
             transition: background-color 0.3s ease;
-        }
-        
-        .profile-button:hover {
-            background-color: #0056b3;
-        }
-        
-        .profile-button.secondary {
-            background-color: #6c757d;
-        }
-        
-        .profile-button.secondary:hover {
-            background-color: #5a6268;
+            display: inline-block; /* Essential for <a> tags */
         }
 
+        .profile-button:hover {
+            background-color: #027a4f;
+        }
     </style>
 </head>
 <body>
 
     <div class="profile-container">
-        
         <header class="profile-header">
-            <img src="https://via.placeholder.com/150" alt="User Avatar" class="profile-avatar">
+            <img src="https://via.placeholder.com/120/04AA6D/FFFFFF?text={{ username[0] }}" 
+                 alt="User Avatar" 
+                 class="profile-avatar">
+
             <h1 class="profile-name">{{ username }}</h1>
             <p class="profile-email">{{ email }}</p>
+
+            {% if role %}
+                <p style="font-weight: 600; color: #04AA6D;">Role: {{ role }}</p>
+            {% endif %}
         </header>
 
         <main class="profile-body">
-            <ul class="profile-details-list">
-                <li>
-                    <strong>Username:</strong>
-                    <span>{{ username }}</span>
-                </li>
-                <li>
-                    <strong>Email:</strong>
-                    <span>{{ email }}</span>
-                </li>
-                <li>
-                    <strong>Joined Date:</strong>
-                    <span>N/A</span>
-                </li>
-                <li>
-                    <strong>Account Status:</strong>
-                    <span>Active</span>
-                </li>
-            </ul>
+            {% if error %}
+                <div class="alert error">{{ error }}</div>
+            {% elif success %}
+                <div class="alert success">{{ success }}</div>
+            {% endif %}
+
+            {% if email == 'Session Only' %}
+                <div class="guest-message">
+                    You are logged in as a Guest. No details are stored or editable.
+                </div>
+            {% else %}
+                <ul class="profile-details-list">
+                    <li>
+                        <strong>Username:</strong>
+                        <span>{{ username }}</span>
+                    </li>
+                    <li>
+                        <strong>Email:</strong>
+                        <span>{{ email }}</span>
+                    </li>
+                    <li>
+                        <strong>Role:</strong>
+                        <span>{{ role }}</span>
+                    </li>
+                    <li>
+                        <strong>Account Status:</strong>
+                        <span style="color: #04AA6D; font-weight: bold;">Active</span>
+                    </li>
+                </ul>
+            {% endif %}
         </main>
 
         <footer class="profile-footer">
-            <button class="profile-button">Edit Profile</button>
+            {% if email != 'Session Only' %}
+                <a href="{{ url_for('edit_profile_page') }}" class="profile-button">Edit Profile</a>
+            {% endif %}
         </footer>
-
     </div>
 
 </body>

@@ -68,11 +68,10 @@ LIVE_COUNTS = {}
 OBJECT_TRACKER = {}
 
 # =======================================================
-# --- AUTHENTICATION AND DATA UTILITY FUNCTIONS (Defined FIRST) ---
+# --- AUTHENTICATION AND DATA UTILITY FUNCTIONS ---
 # =======================================================
 
 def generate_server_jwt(uid, email, username):
-    """Generates a secure server-side JWT for cookie-based session management."""
     payload = {
         "uid": uid, "email": email, "username": username,
         "iat": datetime.now(UTC),
@@ -81,28 +80,26 @@ def generate_server_jwt(uid, email, username):
     return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
 
 def verify_server_jwt(token):
-    """Verifies and decodes the server JWT."""
     try:
         return jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
     except (jwt.ExpiredSignatureError, jwt.InvalidTokenError):
         return None
 
 def check_auth(request):
-    """Checks for a valid server JWT in the cookie."""
     return verify_server_jwt(request.cookies.get('server_jwt'))
 
 def get_logged_in_uid(request):
-    """Retrieves the UID from the server JWT cookie."""
     jwt_token = request.cookies.get('server_jwt')
     decoded = verify_server_jwt(jwt_token)
     return decoded.get('uid') if decoded else None
 
 def get_auth_token(request):
-    """Retrieves the Firebase ID token from the session."""
     return session['user'].get('idToken') if 'user' in session else None
 
+def is_user_admin(uid):
+    return uid != GUEST_UID and session['user'].get('is_admin', False)
+
 def get_display_uid_and_token(request):
-    """Determines the effective UID and token for displaying data (handles admin view)."""
     logged_in_uid = get_logged_in_uid(request)
     if not logged_in_uid:
         return None, None, False
@@ -114,18 +111,11 @@ def get_display_uid_and_token(request):
     return display_uid, logged_in_token, is_admin_view
 
 def get_effective_fetch_token(token, display_uid):
-    """Determines the token to use for DB fetching based on Guest/Admin status."""
     if token == GUEST_ID_TOKEN:
-        # If the viewer is the Guest, and they are trying to read any Firebase data,
-        # we must return a genuinely empty string to signal an unauthenticated read to pyrebase.
         return ""
-    # Otherwise, return the real token for authenticated reads
     return token
 
 def fetch_data_from_db(path, token=""):
-    """
-    Robustly fetches data using the positional token argument for older pyrebase versions.
-    """
     try:
         if token and token.strip():
             return db.child(path).get(token).val()
@@ -136,27 +126,32 @@ def fetch_data_from_db(path, token=""):
         return None
 
 def get_user_data(uid, id_token):
-    """Fetches user data using positional token argument (compatible with pyrebase)."""
     path = f"user/{uid}"
     return fetch_data_from_db(path, id_token)
 
-def get_all_users(id_token, current_user_uid):
-    """Fetches list of all users for display."""
+def get_all_users(id_token, current_user_uid, is_viewer_admin):
+    """
+    FIXED: Both Admin and Standard Users see only Admin Users in the list.
+    """
     users_data = fetch_data_from_db("user", id_token)
-    
     if users_data is None:
         return []
-            
+
+    # FIX: Set the target role universally to 'admin' (based on user request)
+    target_role = 'admin' 
+
     return [{
         'uid': uid,
         'username': data.get('user_name', 'Unknown User')
-    } for uid, data in users_data.items() if uid != GUEST_UID and uid != current_user_uid and 'user_name' in data]
+    } for uid, data in users_data.items()
+        if uid != GUEST_UID
+        and uid != current_user_uid
+        and 'user_name' in data
+        and data.get('role', '') == target_role
+    ]
+
 
 def get_logged_areas(display_uid, token):
-    """
-    Fetches areas with logged data for the displayed user. 
-    Handles GUEST Admin View data fetching via DUMMY TOKEN.
-    """
     if display_uid == GUEST_UID:
         return sorted(set(entry['area'] for entry in session.get('GUEST_LOGS', [])))
     
@@ -170,11 +165,11 @@ def get_logged_areas(display_uid, token):
     return sorted(logged_areas)
 
 # =======================================================
-# --- VIDEO PROCESSING & STREAM MANAGEMENT FUNCTIONS ---
+# --- VIDEO PROCESSING & STREAM MANAGEMENT FUNCTIONS (Unchanged) ---
 # =======================================================
 
 def get_bbox_center(x1, y1, x2, y2):
-    return int((x1 + x2) / 2), int((y1 + y2) / 2)
+    return int((x1 + x2) / 2), int((y1 + y2) / 2) 
 
 def is_in_aoi_below_line(center_x, center_y, line_coords):
     x1, y1, x2, y2 = line_coords
@@ -287,7 +282,7 @@ def video_feed_generator(uid, area_name):
         except Exception as e: print(f"Video feed error for {area_name} (User: {uid}): {e}"); break
 
 # =======================================================
-# --- CHART GENERATION FUNCTIONS ---
+# --- CHART GENERATION FUNCTIONS (Unchanged) ---
 # =======================================================
 
 def generate_crowd_chart_image():
@@ -385,7 +380,7 @@ def generate_density_chart_image():
     return base64.b64encode(buf.getbuffer()).decode("ascii")
 
 # =======================================================
-# --- FLASK ROUTES ---
+# --- FLASK ROUTES (Modified: login, register, profile, update_profile, home, restricted pages) ---
 # =======================================================
 
 @app.route('/')
@@ -400,7 +395,7 @@ def signin():
 def login():
     if request.form.get('is_guest') == 'true':
         server_jwt = generate_server_jwt(GUEST_UID, 'guest@session.com', 'Guest')
-        session['user'] = {'uid': GUEST_UID, 'idToken': GUEST_ID_TOKEN, 'jwt': server_jwt}
+        session['user'] = {'uid': GUEST_UID, 'idToken': GUEST_ID_TOKEN, 'jwt': server_jwt, 'is_admin': False}
         session.pop('VIEWING_UID', None)
         session['GUEST_LOGS'] = []
         response = make_response(redirect(url_for('index')))
@@ -418,8 +413,17 @@ def login():
             return render_template('signin.html', Error="Profile data error. Please register again.")
             
         username = user_data.get('user_name', 'User')
+        user_role = user_data.get('role', 'user')
+        
+        # --- ADMIN ROLE CHECK ---
+        is_admin_user = (user_role == 'admin')
+        # ------------------------
+        
         server_jwt = generate_server_jwt(uid, email, username)
-        session['user'] = {'uid': uid, 'idToken': id_token, 'jwt': server_jwt}
+        
+        # Store is_admin status in session 
+        session['user'] = {'uid': uid, 'idToken': id_token, 'jwt': server_jwt, 'is_admin': is_admin_user}
+        
         session.pop('VIEWING_UID', None)
         response = make_response(redirect(url_for('index')))
         response.set_cookie('server_jwt', server_jwt, httponly=True, samesite='Lax')
@@ -432,9 +436,17 @@ def login():
 def register():
     try:
         email, password, username = request.form['email'], request.form['password'], request.form['username']
+        # Default role is 'user'. Role is received from the form.
+        role = request.form.get('role', 'user') 
+        
         user = auth.create_user_with_email_and_password(email, password)
         uid, id_token = user['localId'], user['idToken']
-        db.child("user").child(uid).set({"user_name": username}, id_token)
+        
+        db.child("user").child(uid).set({
+            "user_name": username, 
+            "role": role 
+        }, id_token)
+        
         return redirect(url_for('signin'))
     except Exception as e:
         print(e)
@@ -451,7 +463,7 @@ def index():
 @app.route('/view_user/<target_uid>')
 def view_user(target_uid):
     """
-    Allows Guest users (or any logged-in user) to access the Admin View.
+    Allows a user to initiate the view of another user's dashboard.
     """
     logged_in_uid = get_logged_in_uid(request)
     
@@ -461,6 +473,7 @@ def view_user(target_uid):
     if logged_in_uid != target_uid:
         session['VIEWING_UID'] = target_uid
     else:
+        # Clear admin view if they click on their own profile
         session.pop('VIEWING_UID', None) 
         
     return redirect(url_for('home'))
@@ -475,9 +488,98 @@ def profile():
     decoded = check_auth(request)
     if not decoded:
         return redirect(url_for('signin'))
-    if decoded.get('uid') == GUEST_UID:
-        return render_template('profile.html', username='Guest', email='Session Only')
-    return render_template('profile.html', username=decoded.get('username'), email=decoded.get('email'))
+    
+    logged_in_uid = decoded.get('uid')
+    token = get_auth_token(request)
+    
+    if logged_in_uid == GUEST_UID:
+        return render_template('profile.html', username='Guest', email='Session Only', role='Guest')
+    
+    # Fetch user data to display the current username and role
+    user_data = get_user_data(logged_in_uid, token)
+    username = user_data.get('user_name', decoded.get('username'))
+    role = user_data.get('role', 'user').capitalize()
+    
+    # Pass error/success messages from query parameters to the template
+    error_message = request.args.get('error')
+    success_message = request.args.get('success')
+
+    return render_template('profile.html', 
+                           username=username, 
+                           email=decoded.get('email'),
+                           role=role,
+                           error=error_message,
+                           success=success_message)
+
+@app.route('/edit_profile')
+def edit_profile_page():
+    decoded = check_auth(request)
+    if not decoded or decoded.get('uid') == GUEST_UID:
+        return redirect(url_for('signin'))
+
+    logged_in_uid = decoded.get('uid')
+    token = get_auth_token(request)
+
+    user_data = get_user_data(logged_in_uid, token)
+    
+    username = user_data.get('user_name', decoded.get('username'))
+    current_role = user_data.get('role', 'user')
+
+    return render_template('edit_profile.html', 
+                           username=username, 
+                           email=decoded.get('email'),
+                           current_role=current_role,
+                           error=request.args.get('error'),
+                           success=request.args.get('success'))
+
+
+@app.route('/update_profile', methods=['POST'])
+def update_profile():
+    decoded = check_auth(request)
+    if not decoded or decoded.get('uid') == GUEST_UID:
+        return redirect(url_for('signin'))
+
+    logged_in_uid = decoded.get('uid')
+    token = get_auth_token(request)
+    
+    # 1. Gather data from the form
+    new_username = request.form.get('username')
+    new_password = request.form.get('password')
+    new_role = request.form.get('role')
+    
+    updates = {}
+    error = None
+    
+    # 2. Update Username (Firebase Realtime Database)
+    if new_username and new_username != decoded.get('username'):
+        updates['user_name'] = new_username
+        
+    # 3. Update Role (Firebase Realtime Database)
+    if new_role and new_role.lower() != session['user'].get('role', 'user'):
+        updates['role'] = new_role.lower()
+
+    if updates:
+        try:
+            db.child("user").child(logged_in_uid).update(updates, token)
+        except Exception as e:
+            error = "Failed to update username/role in DB."
+
+    # 4. Update Password (Firebase Authentication)
+    if new_password:
+        try:
+            auth.update_user(id_token=token, password=new_password)
+        except Exception as e:
+            error = "Failed to update password. Please re-login first."
+
+    # 5. Success and redirect
+    if error:
+        return redirect(url_for('edit_profile_page', error=error))
+    else:
+        # If any changes were made, prompt re-login.
+        if updates or new_password:
+             return redirect(url_for('profile', success="Profile updated successfully. Please re-login for changes to take full effect."))
+        return redirect(url_for('profile'))
+
 
 @app.route('/home')
 def home():
@@ -488,6 +590,8 @@ def home():
     logged_in_uid = decoded.get('uid')
     token = get_auth_token(request)
     display_uid, _, is_admin_view = get_display_uid_and_token(request)
+    
+    is_admin = is_user_admin(logged_in_uid)
 
     # --- Determine the token to use for data fetching ---
     effective_token = token
@@ -496,16 +600,16 @@ def home():
     # --------------------------------------------------
 
     displayed_username = (get_user_data(display_uid, effective_token).get('user_name', 'Viewed User')
-                          if is_admin_view and display_uid else decoded.get('username', 'User'))
+                          if is_admin_view and display_uid != GUEST_UID else decoded.get('username', 'User'))
 
-    # FIX: Only display user list if the user is a registered user, not Guest.
+    # Get user list based on the viewer's role, and show it only if not already viewing someone else
     if logged_in_uid != GUEST_UID and not is_admin_view:
-         all_users = get_all_users(token, logged_in_uid)
+          # FIX: Both Admins and Standard users see Admins in the list
+          all_users = get_all_users(token, logged_in_uid, is_admin)
     else:
-         all_users = []
+          all_users = []
     
-    # Fetch streams and charts using the determined token
-    current_user_streams = STREAM_SOURCES.get(display_uid, {}) # Stream list is global state, no token needed here
+    current_user_streams = STREAM_SOURCES.get(display_uid, {}) 
     
     historical_chart_data = generate_crowd_chart_image()
     density_chart_data = generate_density_chart_image()
@@ -522,7 +626,7 @@ def home():
                            cameras=camera_data,
                            historical_chart_data=historical_chart_data,
                            density_chart_data=density_chart_data,
-                           all_users=all_users,
+                           all_users=all_users, 
                            is_admin_view=is_admin_view,
                            displayed_username=displayed_username)
 
@@ -531,13 +635,13 @@ def history_download_page():
     decoded = check_auth(request)
     if not decoded:
         return redirect(url_for('signin'))
+        
     display_uid, token, is_admin_view = get_display_uid_and_token(request)
+    logged_in_uid = get_logged_in_uid(request)
     
-    # --- Manual Token Substitution for Admin View ---
     effective_token = token
-    if get_logged_in_uid(request) == GUEST_UID:
+    if logged_in_uid == GUEST_UID:
         effective_token = GUEST_ID_TOKEN
-    # -----------------------------------------------
 
     logged_areas = get_logged_areas(display_uid, effective_token) 
     
@@ -545,30 +649,46 @@ def history_download_page():
                           if is_admin_view and display_uid != GUEST_UID else decoded.get('username', 'User'))
                           
     return render_template('history_download.html', logged_areas=logged_areas,
-                           is_admin_view=is_admin_view, displayed_username=displayed_username)
+                            is_admin_view=is_admin_view, displayed_username=displayed_username)
+
+
+# 🔑 RESTRICTED PAGES FOR STANDARD USERS (Standard Users redirect to home)
 
 @app.route('/vid_analy')
 def vid_analy():
     decoded = check_auth(request)
     if not decoded:
         return redirect(url_for('signin'))
+    
     logged_in_uid = decoded.get('uid')
-
+    
+    # Redirect if the user is a Standard User, otherwise proceed (Admin/Guest allowed)
+    if logged_in_uid != GUEST_UID and not is_user_admin(logged_in_uid):
+        return redirect(url_for('home'))
+        
     if get_display_uid_and_token(request)[2]:
         return redirect(url_for('home'))
 
     current_user_streams = get_all_user_streams(logged_in_uid)
     camera_data = [{'areaName': name,
                     'sourceType': 'Webcam' if info['source'] == '0' else 'Video File'}
-                   for name, info in current_user_streams.items()]
+                    for name, info in current_user_streams.items()]
     return render_template("vid_analy.html", cameras=camera_data)
 
 @app.route('/cam_manage', methods=['GET'])
 def cam_manage_page():
     if check_auth(request) is None:
         return redirect(url_for('signin'))
+    
+    logged_in_uid = get_logged_in_uid(request)
+        
+    # Redirect if the user is a Standard User, otherwise proceed (Admin/Guest allowed)
+    if logged_in_uid != GUEST_UID and not is_user_admin(logged_in_uid):
+        return redirect(url_for('home'))
+        
     if get_display_uid_and_token(request)[2]:
         return redirect(url_for('home'))
+        
     return render_template("cam_manage.html")
 
 @app.route('/define_aoi/<area_name>')
@@ -576,13 +696,21 @@ def define_aoi_page(area_name):
     decoded = check_auth(request)
     if not decoded:
         return redirect(url_for('signin'))
+    
     logged_in_uid = decoded.get('uid')
+        
+    # Redirect if the user is a Standard User, otherwise proceed (Admin/Guest allowed)
+    if logged_in_uid != GUEST_UID and not is_user_admin(logged_in_uid):
+        return redirect(url_for('home'))
+        
     if get_display_uid_and_token(request)[2]:
         return redirect(url_for('home'))
 
     if not get_stream_info(logged_in_uid, area_name):
         return "Error: Stream must be active to define AOI.", 400
     return render_template('define_aoi.html', area_name=area_name)
+
+# ----------------------------------------------------------------------
 
 @app.route('/video_feed/<area_name>')
 def video_feed(area_name):
@@ -598,16 +726,14 @@ def video_feed(area_name):
 @app.route('/download_history/')
 @app.route('/download_history/<area_name>')
 def download_history(area_name=''):
-    display_uid, token, _ = get_display_uid_and_token(request)
+    display_uid, token, is_admin_view = get_display_uid_and_token(request)
     if not display_uid:
         return redirect(url_for('signin'))
 
     history = []
-    # --- Manual Token Substitution for Admin View ---
     effective_token = token
-    if get_logged_in_uid(request) == GUEST_UID and display_uid != GUEST_UID:
+    if get_logged_in_uid(request) == GUEST_UID:
         effective_token = GUEST_ID_TOKEN
-    # -----------------------------------------------
 
     if display_uid == GUEST_UID:
         history = [e for e in session.get('GUEST_LOGS', []) if e['area'] == area_name] if area_name else session.get('GUEST_LOGS', [])
@@ -653,9 +779,11 @@ def delete_history(area_name):
     if not logged_in_uid or not token:
         return redirect(url_for('signin'))
     
+    # Restrict deletion if viewing another user's data (universal read-only mode)
     if 'VIEWING_UID' in session and session['VIEWING_UID'] != logged_in_uid:
         return jsonify({"message": "Cannot delete history in Admin View."}), 403
 
+    # GUEST users cannot delete permanent logs
     if logged_in_uid == GUEST_UID:
         session['GUEST_LOGS'] = [e for e in session.get('GUEST_LOGS', []) if e['area'] != area_name]
         return jsonify({"message": f"Cleared session history for {area_name}."}), 200
@@ -669,14 +797,14 @@ def delete_history(area_name):
 
 @app.before_request
 def check_admin_view_permissions():
-    """Guardrail to prevent modification actions when an admin is viewing another user's data."""
-    if request.method == 'POST' or request.endpoint in ['cam_manage_page', 'vid_analy', 'define_aoi_page']:
+    """Guardrail to prevent modification actions when a user is viewing another user's data."""
+    if request.method == 'POST' or request.endpoint in ['cam_manage_page', 'vid_analy', 'define_aoi_page', 'upload_video', 'upload_cam', 'set_aoi', 'stop_stream', 'delete_history', 'api_camera_config']:
         _, _, is_admin_view = get_display_uid_and_token(request)
         if is_admin_view:
-            action_endpoints = ['log_area_count', 'upload_video', 'upload_cam', 'set_aoi', 'stop_stream', 'delete_history', 'api_camera_config']
-            
-            if request.endpoint in action_endpoints or request.path in ['/upload_video', '/upload_cam', '/set_aoi', '/stop_stream', '/delete_history', '/api/camera_config']:
-                return (jsonify({"message": "Restricted in Admin View."}), 403) if request.is_json else redirect(url_for('home'))
+            # When viewing another user (Admin View is active), ONLY data retrieval (GET) is allowed.
+            # POST requests attempting modification are forbidden.
+            if request.method == 'POST' or request.endpoint in ['upload_video', 'upload_cam', 'set_aoi', 'stop_stream', 'delete_history', 'api_camera_config']:
+                 return (jsonify({"message": "Restricted in Admin View."}), 403) if request.is_json else redirect(url_for('home'))
 
 @app.route('/get_total_count', methods=['GET'])
 def get_total_count():
@@ -707,6 +835,9 @@ def get_count(area_name):
 def upload_video():
     logged_in_uid = get_logged_in_uid(request)
     if not logged_in_uid: return jsonify({"error": "Unauthorized"}), 401
+    
+    # Only Admins can use this page
+    if not is_user_admin(logged_in_uid): return jsonify({"error": "Access Denied"}), 403
 
     if "video" not in request.files:
         return jsonify({"error": "No file"}), 400
@@ -730,6 +861,9 @@ def upload_cam():
     logged_in_uid = get_logged_in_uid(request)
     if not logged_in_uid: return jsonify({"error": "Unauthorized"}), 401
 
+    # Only Admins can use this page
+    if not is_user_admin(logged_in_uid): return jsonify({"error": "Access Denied"}), 403
+
     area_name = request.form.get("areaName", "Unknown")
     threshold = int(request.form.get("capacityThreshold", 0))
 
@@ -743,6 +877,9 @@ def upload_cam():
 def set_aoi():
     logged_in_uid = get_logged_in_uid(request)
     if not logged_in_uid: return jsonify({"message": "Unauthorized."}), 401
+
+    # Only Admins can use this page
+    if not is_user_admin(logged_in_uid): return jsonify({"error": "Access Denied"}), 403
 
     data = request.get_json()
     area_name = data.get("areaName")
@@ -760,6 +897,9 @@ def set_aoi():
 def stop_stream():
     logged_in_uid = get_logged_in_uid(request)
     if not logged_in_uid: return jsonify({"message": "Unauthorized."}), 401
+
+    # Only Admins can use this page
+    if not is_user_admin(logged_in_uid): return jsonify({"error": "Access Denied"}), 403
 
     area_name = request.json.get("areaName")
 
@@ -799,11 +939,9 @@ def log_area_count():
     entry = {'area': data['area'], 'count': int(data['count']), 'time': data['time']}
     
     if logged_in_uid == GUEST_UID:
-        logs = session.get('GUEST_LOGS', [])
-        logs.append(entry)
-        if len(logs) > MAX_LOG_SIZE:
-            logs.pop(0)
-        session['GUEST_LOGS'] = logs
+        session['GUEST_LOGS'].append(entry)
+        if len(session['GUEST_LOGS']) > MAX_LOG_SIZE:
+            session['GUEST_LOGS'].pop(0)
     else:
         if not token: 
              return jsonify({"message": "Auth token missing for registered user."}), 401
@@ -859,6 +997,10 @@ def api_camera_config():
         if request.method == 'GET':
             return jsonify({"configs": []}), 200
         return jsonify({"message": "Unauthorized."}), 401
+    
+    # Only Admins can use this page
+    if not is_user_admin(logged_in_uid): return jsonify({"error": "Access Denied"}), 403
+
 
     if request.method == 'GET':
         data = fetch_data_from_db(f"{USER_CAMERAS_REF}/{logged_in_uid}", token) or {}

@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Edit Profile</title>
+    <style>
+        /* Inheriting styles from profile.html for consistency */
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: #f0f2f5;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            margin: 0;
+        }
+
+        .profile-container {
+            background-color: #ffffff;
+            width: 100%;
+            max-width: 500px;
+            border-radius: 12px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+            margin: 20px;
+            padding: 30px;
+        }
+
+        h2 {
+            text-align: center;
+            color: #333;
+            margin-bottom: 30px;
+            border-bottom: 1px solid #eee;
+            padding-bottom: 15px;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        .form-group label {
+            display: block;
+            font-weight: 600;
+            color: #555;
+            margin-bottom: 5px;
+        }
+
+        .form-group input[type="text"],
+        .form-group input[type="password"],
+        .form-group select {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ccc;
+            border-radius: 6px;
+            box-sizing: border-box;
+            font-size: 16px;
+        }
+
+        .alert {
+            padding: 10px;
+            margin-bottom: 15px;
+            border-radius: 5px;
+            text-align: center;
+        }
+
+        .alert.error {
+            background-color: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        
+        .button-group {
+            display: flex;
+            justify-content: space-between;
+            margin-top: 30px;
+        }
+
+        .btn-update, .btn-back {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 6px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            text-decoration: none;
+            transition: background-color 0.3s ease;
+        }
+        
+        .btn-update {
+            background-color: #04AA6D;
+            color: white;
+        }
+        
+        .btn-update:hover {
+            background-color: #027a4f;
+        }
+
+        .btn-back {
+            background-color: #6c757d;
+            color: white;
+            text-align: center;
+            line-height: 24px; /* Align text vertically */
+        }
+        
+        .btn-back:hover {
+            background-color: #5a6268;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="profile-container">
+        <h2>Edit Profile Details</h2>
+        
+        {% if error %}
+            <div class="alert error">{{ error }}</div>
+        {% endif %}
+
+        <form method="POST" action="{{ url_for('update_profile') }}">
+            
+            <div class="form-group">
+                <label for="username">Username (ID):</label>
+                <input type="text" id="username" name="username" value="{{ username }}" required>
+            </div>
+            
+            <div class="form-group">
+                <label for="email">Email (Read Only):</label>
+                <input type="text" id="email" value="{{ email }}" disabled style="background-color: #f8f8f8;">
+            </div>
+
+            <div class="form-group">
+                <label for="password">New Password (Leave blank to keep current):</label>
+                <input type="password" id="password" name="password" placeholder="Enter new password">
+            </div>
+
+            <div class="form-group">
+                <label for="role">User Role:</label>
+                <select id="role" name="role">
+                    <option value="user" {% if current_role == 'user' %}selected{% endif %}>Standard User</option>
+                    <option value="admin" {% if current_role == 'admin' %}selected{% endif %}>Administrator</option>
+                </select>
+            </div>
+
+            <div class="button-group">
+                <a href="{{ url_for('profile') }}" class="btn-back">Cancel/Back</a>
+                <button type="submit" class="btn-update">Update Profile</button>
+            </div>
+        </form>
+    </div>
+
+</body>
+</html>
