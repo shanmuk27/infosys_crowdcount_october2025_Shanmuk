@@ -169,13 +169,13 @@ def get_logged_areas(display_uid, token):
 # =======================================================
 
 def get_bbox_center(x1, y1, x2, y2):
-    return int((x1 + x2) / 2), int((y1 + y2) / 2) 
+    return int((x1 + x2) / 2), int((y1 + y2) / 2) #finding Centroid
 
 def is_in_aoi_below_line(center_x, center_y, line_coords):
     x1, y1, x2, y2 = line_coords
     
     if x1 == x2: return False
-    m = (y2 - y1) / (x2 - x1)
+    m = (y2 - y1) / (x2 - x1) #Area of Interest(slope)
     b = y1 - m * x1
     return center_y > m * center_x + b
 
@@ -198,10 +198,10 @@ def start_stream_thread(uid, area_name, source_path, threshold, line_coords=None
     LIVE_COUNTS[key] = 0
     FRAME_QUEUES[key] = queue.Queue(maxsize=15)
     OBJECT_TRACKER[key] = {}
-    thread = threading.Thread(target=continuous_video_analysis, args=(source_path, area_name, uid), daemon=True)
+    thread = threading.Thread(target=continuous_video_analysis, args=(source_path, area_name, uid), daemon=True)  #sending each video into thread
     thread.start()
     ACTIVE_THREADS[key] = thread
-
+    
 def continuous_video_analysis(source, area_name, owner_uid):
     global LIVE_COUNTS, FRAME_QUEUES, ACTIVE_THREADS, OBJECT_TRACKER, NEXT_ID
     key = (owner_uid, area_name)
@@ -219,7 +219,7 @@ def continuous_video_analysis(source, area_name, owner_uid):
         source_info = get_stream_info(owner_uid, area_name)
         if not source_info: break
         line_coords = source_info.get('line_coords')
-        results = model.predict(source=frame, classes=[person_class_id], conf=confidence_threshold, iou=iou_threshold, stream=False, verbose=False)
+        results = model.predict(source=frame, classes=[person_class_id], conf=confidence_threshold, iou=iou_threshold, stream=False, verbose=False)  #calling yolo
         result = next(iter(results), None)
         if not result or result.orig_img is None: time.sleep(0.01); continue
         processed_frame = result.orig_img.copy()
